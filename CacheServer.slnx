@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+  </Folder>
+  <Project Path="../CacheServer.Test/CacheServer.Test.csproj" Id="3fdd16d2-3377-4b60-bf83-e55d6d94a1db" />
+  <Project Path="CacheServer.csproj" />
+</Solution>

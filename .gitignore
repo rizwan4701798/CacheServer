@@ -1,0 +1,11 @@
+# Visual Studio
+.vs/
+bin/
+obj/
+
+# User-specific
+*.user
+*.suo
+
+# Logs
+*.log
