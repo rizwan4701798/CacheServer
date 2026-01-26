@@ -6,6 +6,8 @@ using System.Text;
 using Manager;
 using CacheServerModels;
 
+namespace CacheServer.Server;
+
 public class CacheServer
 {
     private readonly TcpListener _listener;

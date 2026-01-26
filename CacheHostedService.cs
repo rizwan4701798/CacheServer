@@ -3,12 +3,13 @@ using Microsoft.Extensions.Configuration;
 using Manager;
 using System.Threading;
 using System.Threading.Tasks;
+using CacheServer.Server;
 
 public class CacheHostedService : IHostedService
 {
     private readonly IConfiguration _configuration;
     private readonly ICacheManager _cacheManager;
-    private CacheServer _cacheServer;
+    private CacheServer.Server.CacheServer _cacheServer;
 
     public CacheHostedService(
         IConfiguration configuration,
@@ -22,7 +23,7 @@ public class CacheHostedService : IHostedService
     {
         int port = _configuration.GetValue<int>("CacheSettings:Port", 5050);
 
-        _cacheServer = new CacheServer(port, _cacheManager);
+        _cacheServer = new CacheServer.Server.CacheServer(port, _cacheManager);
         _cacheServer.Start();
 
         return Task.CompletedTask;
