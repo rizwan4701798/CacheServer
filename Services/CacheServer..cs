@@ -26,7 +26,7 @@ public class CacheServer
     {
         _isRunning = true;
         _listener.Start();
-        _logger.Info("Cache Server started");
+        _logger.Info(CacheServerConstants.CacheServerStarted);
 
         Thread listenerThread = new Thread(ListenForClients);
         listenerThread.Start();
@@ -36,7 +36,7 @@ public class CacheServer
     {
         _isRunning = false;
         _listener.Stop();
-        _logger.Info("Cache Server stopped");
+        _logger.Info(CacheServerConstants.CacheServerStopped);
     }
 
     private void ListenForClients()
@@ -51,7 +51,7 @@ public class CacheServer
             catch (Exception ex)
             {
                 if (_isRunning)
-                    _logger.Error("Error accepting client", ex);
+                    _logger.Error(CacheServerConstants.ErrorAcceptingClient, ex);
             }
         }
     }
@@ -78,7 +78,7 @@ public class CacheServer
         }
         catch (Exception ex)
         {
-            _logger.Error("Error handling client", ex);
+            _logger.Error(CacheServerConstants.ErrorHandlingClient, ex);
         }
         finally
         {
@@ -92,16 +92,16 @@ public class CacheServer
         {
             return request.Operation.ToUpper() switch
             {
-                "CREATE" => new CacheResponse { Success = _cacheManager.Create(request.Key, request.Value) },
-                "READ" => new CacheResponse { Success = true, Value = _cacheManager.Read(request.Key) },
-                "UPDATE" => new CacheResponse { Success = _cacheManager.Update(request.Key, request.Value) },
-                "DELETE" => new CacheResponse { Success = _cacheManager.Delete(request.Key) },
-                _ => new CacheResponse { Success = false, Error = "Invalid operation" }
+                CacheServerConstants.CREATE => new CacheResponse { Success = _cacheManager.Create(request.Key, request.Value) },
+                CacheServerConstants.READ => new CacheResponse { Success = true, Value = _cacheManager.Read(request.Key) },
+                CacheServerConstants.UPDATE => new CacheResponse { Success = _cacheManager.Update(request.Key, request.Value) },
+                CacheServerConstants.DELETE=> new CacheResponse { Success = _cacheManager.Delete(request.Key) },
+                _ => new CacheResponse { Success = false, Error = CacheServerConstants.InvalidOperation}
             };
         }
         catch (Exception ex)
         {
-            _logger.Error("Processing request failed", ex);
+            _logger.Error(CacheServerConstants.ProcessingRequestFailed, ex);
             return new CacheResponse { Success = false, Error = ex.Message };
         }
     }

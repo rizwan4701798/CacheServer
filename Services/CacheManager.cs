@@ -17,7 +17,7 @@ public class CacheManager : ICacheManager
     public bool Create(string key, object value)
     {
         if (_cache.Count >= _maxItems)
-            throw new InvalidOperationException("Cache is full");
+            throw new InvalidOperationException(CacheServerConstants.CacheIsFull);
 
         return _cache.TryAdd(key, value);
     }
