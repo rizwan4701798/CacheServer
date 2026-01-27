@@ -1,9 +1,6 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using Manager;
 using Microsoft.Extensions.Configuration;
-using Manager;
-using System.Threading;
-using System.Threading.Tasks;
-using CacheServer.Server;
+using Microsoft.Extensions.Hosting;
 
 public class CacheHostedService : IHostedService
 {
@@ -13,7 +10,7 @@ public class CacheHostedService : IHostedService
 
     public CacheHostedService(
         IConfiguration configuration,
-        CacheManager cacheManager)
+        ICacheManager cacheManager)
     {
         _configuration = configuration;
         _cacheManager = cacheManager;
