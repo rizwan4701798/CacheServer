@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using log4net;
 using Newtonsoft.Json;
 
@@ -17,14 +16,14 @@ internal sealed class CacheItem
 public sealed class CacheManager : ICacheManager, IDisposable
 {
     private readonly ILog _logger;
-    private readonly ConcurrentDictionary<string, CacheItem> _cache;
+    private readonly Dictionary<string, CacheItem> _cache;
     private readonly int _maxItems;
     private readonly object _capacityLock = new();
     private readonly Timer _cleanupTimer;
     private bool _disposed;
 
-    // LFU tracking: frequency -> set of keys with that frequency (ordered by access time)
-    private readonly SortedDictionary<int, LinkedList<string>> _frequencyBuckets;
+    // LFU tracking: frequency -> set of keys with that frequency
+    private readonly Dictionary<int, LinkedList<string>> _frequencyBuckets;
     // Quick lookup: key -> node in the linked list (for O(1) removal)
     private readonly Dictionary<string, LinkedListNode<string>> _keyNodes;
     private int _minFrequency;
@@ -39,10 +38,10 @@ public sealed class CacheManager : ICacheManager, IDisposable
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxItems);
 
         _maxItems = maxItems;
-        _cache = new ConcurrentDictionary<string, CacheItem>();
+        _cache = new Dictionary<string, CacheItem>();
 
         // Initialize LFU tracking
-        _frequencyBuckets = new SortedDictionary<int, LinkedList<string>>();
+        _frequencyBuckets = new Dictionary<int, LinkedList<string>>();
         _keyNodes = new Dictionary<string, LinkedListNode<string>>();
         _minFrequency = 0;
 
@@ -130,7 +129,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
             if (item.IsExpired)
             {
                 RemoveFromFrequencyBucket(key, item.Frequency);
-                _cache.TryRemove(key, out _);
+                _cache.Remove(key);
 
                 string expiredValueLog = SerializeValueForLog(item.Value);
                 _logger.Info($"READ EXPIRED: Key='{key}', Value={expiredValueLog}, ExpiredAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}, Frequency={item.Frequency} {GetCacheStats()}");
@@ -172,7 +171,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
             if (existingItem.IsExpired)
             {
                 RemoveFromFrequencyBucket(key, existingItem.Frequency);
-                _cache.TryRemove(key, out _);
+                _cache.Remove(key);
 
                 string expiredValueLog = SerializeValueForLog(existingItem.Value);
                 _logger.Info($"UPDATE EXPIRED: Key='{key}', OldValue={expiredValueLog}, ExpiredAt={existingItem.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC} {GetCacheStats()}");
@@ -221,7 +220,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
                     ? $", ExpiresAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}"
                     : ", ExpiresAt=Never";
 
-                _cache.TryRemove(key, out _);
+                _cache.Remove(key);
 
                 _logger.Info($"DELETE SUCCESS: Key='{key}', Value={valueLog}, Frequency={item.Frequency}{expirationLog} {GetCacheStats()}");
 
@@ -245,7 +244,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
             foreach (var kvp in expiredItems)
             {
                 RemoveFromFrequencyBucket(kvp.Key, kvp.Value.Frequency);
-                _cache.TryRemove(kvp.Key, out _);
+                _cache.Remove(kvp.Key);
 
                 string valueLog = SerializeValueForLog(kvp.Value.Value);
                 _logger.Info($"CLEANUP EXPIRED: Key='{kvp.Key}', Value={valueLog}, ExpiredAt={kvp.Value.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}, Frequency={kvp.Value.Frequency}");
@@ -357,7 +356,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
                     : ", ExpiresAt=Never";
 
                 RemoveFromFrequencyBucket(keyToEvict, _minFrequency);
-                _cache.TryRemove(keyToEvict, out _);
+                _cache.Remove(keyToEvict);
 
                 _logger.Info($"LFU EVICTION: Key='{keyToEvict}', Value={valueLog}, Frequency={_minFrequency}{expirationLog} {GetCacheStats()}");
 
