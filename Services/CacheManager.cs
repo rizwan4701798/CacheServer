@@ -183,7 +183,6 @@ public sealed class CacheManager : ICacheManager, IDisposable
 
             string oldValueLog = SerializeValueForLog(existingItem.Value);
             string newValueLog = SerializeValueForLog(value);
-            DateTime? oldExpiration = existingItem.ExpiresAt;
 
             existingItem.Value = value;
             existingItem.LastAccessedAt = DateTime.UtcNow;
@@ -333,8 +332,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
 
         RemoveFromFrequencyBucket(key, oldFreq);
 
-        if (oldFreq == _minFrequency &&
-            (!_frequencyBuckets.ContainsKey(oldFreq) || _frequencyBuckets[oldFreq].Count == 0))
+        if (oldFreq == _minFrequency && !_frequencyBuckets.ContainsKey(oldFreq))
         {
             _minFrequency = newFreq;
         }
@@ -371,7 +369,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
                 _logger.Warn($"LFU EVICTION: Key='{keyToEvict}' was in frequency bucket but not in cache");
             }
 
-            if (!_frequencyBuckets.ContainsKey(_minFrequency) || _frequencyBuckets[_minFrequency].Count == 0)
+            if (!_frequencyBuckets.ContainsKey(_minFrequency))
             {
                 _minFrequency = _frequencyBuckets.Count > 0 ? _frequencyBuckets.Keys.Min() : 0;
             }
