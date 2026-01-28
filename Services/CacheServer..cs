@@ -1,4 +1,4 @@
-﻿using log4net;
+using log4net;
 using Newtonsoft.Json;
 using System.Net;
 using System.Net.Sockets;
@@ -92,9 +92,9 @@ public class CacheServer
         {
             return request.Operation.ToUpper() switch
             {
-                CacheServerConstants.CREATE => new CacheResponse { Success = _cacheManager.Create(request.Key, request.Value) },
+                CacheServerConstants.CREATE => new CacheResponse { Success = _cacheManager.Create(request.Key, request.Value, request.ExpirationSeconds) },
                 CacheServerConstants.READ => new CacheResponse { Success = true, Value = _cacheManager.Read(request.Key) },
-                CacheServerConstants.UPDATE => new CacheResponse { Success = _cacheManager.Update(request.Key, request.Value) },
+                CacheServerConstants.UPDATE => new CacheResponse { Success = _cacheManager.Update(request.Key, request.Value, request.ExpirationSeconds) },
                 CacheServerConstants.DELETE=> new CacheResponse { Success = _cacheManager.Delete(request.Key) },
                 _ => new CacheResponse { Success = false, Error = CacheServerConstants.InvalidOperation}
             };

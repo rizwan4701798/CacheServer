@@ -1,10 +1,11 @@
-﻿namespace CacheServerModels
+namespace CacheServerModels
 {
     public class CacheRequest
     {
         public string Operation { get; set; } 
         public string Key { get; set; }
         public object Value { get; set; }
+        public int? ExpirationSeconds { get; set; }
     }
 
     public class CacheResponse
