@@ -1,8 +1,9 @@
-﻿public static class CacheServerConstants
+public static class CacheServerConstants
 {
     // Configuration
     public const string CacheSettingsMaxItemsConfigName = "CacheSettings:MaxItems";
     public const string CacheSettingsPortConfigName = "CacheSettings:Port";
+    public const string CacheSettingsNotificationPortConfigName = "CacheSettings:NotificationPort";
     public const string Log4netConfigName = "log4net.config";
 
     // Server lifecycle
