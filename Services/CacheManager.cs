@@ -4,9 +4,9 @@ using Newtonsoft.Json;
 
 namespace Manager;
 
-internal class CacheItem
+internal sealed class CacheItem
 {
-    public object Value { get; set; }
+    public object? Value { get; set; }
     public DateTime? ExpiresAt { get; set; }
     public int Frequency { get; set; }
     public DateTime LastAccessedAt { get; set; }
@@ -14,13 +14,14 @@ internal class CacheItem
     public bool IsExpired => ExpiresAt.HasValue && DateTime.UtcNow > ExpiresAt.Value;
 }
 
-public class CacheManager : ICacheManager
+public sealed class CacheManager : ICacheManager, IDisposable
 {
     private readonly ILog _logger;
     private readonly ConcurrentDictionary<string, CacheItem> _cache;
     private readonly int _maxItems;
     private readonly object _capacityLock = new();
     private readonly Timer _cleanupTimer;
+    private bool _disposed;
 
     // LFU tracking: frequency -> set of keys with that frequency (ordered by access time)
     private readonly SortedDictionary<int, LinkedList<string>> _frequencyBuckets;
@@ -35,13 +36,7 @@ public class CacheManager : ICacheManager
     {
         _logger = LogManager.GetLogger(typeof(CacheManager));
 
-        if (maxItems <= 0)
-        {
-            _logger.Error($"{CacheServerConstants.InvalidCacheSize}: {maxItems}");
-            throw new ArgumentOutOfRangeException(
-                nameof(maxItems),
-                CacheServerConstants.CacheSizeMustBeGreaterThanZero);
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxItems);
 
         _maxItems = maxItems;
         _cache = new ConcurrentDictionary<string, CacheItem>();
@@ -61,10 +56,7 @@ public class CacheManager : ICacheManager
             TimeSpan.FromSeconds(60),
             TimeSpan.FromSeconds(60));
 
-        _logger.Info(
-            string.Format(
-                CacheServerConstants.CacheInitialized,
-                _maxItems));
+        _logger.Info($"CacheManager initialized with capacity {_maxItems}");
     }
 
     public bool Create(string key, object value, int? expirationSeconds = null)
@@ -127,39 +119,38 @@ public class CacheManager : ICacheManager
             return null;
         }
 
-        if (_cache.TryGetValue(key, out var item))
+        lock (_capacityLock)
         {
-            lock (_capacityLock)
+            if (!_cache.TryGetValue(key, out var item))
             {
-                if (item.IsExpired)
-                {
-                    RemoveFromFrequencyBucket(key, item.Frequency);
-                    _cache.TryRemove(key, out _);
-
-                    string expiredValueLog = SerializeValueForLog(item.Value);
-                    _logger.Info($"READ EXPIRED: Key='{key}', Value={expiredValueLog}, ExpiredAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}, Frequency={item.Frequency} {GetCacheStats()}");
-
-                    EventNotifier.RaiseItemExpired(key);
-                    return null;
-                }
-
-                int oldFrequency = item.Frequency;
-                IncrementFrequency(key, item);
-
-                string valueLog = SerializeValueForLog(item.Value);
-                string expirationLog = item.ExpiresAt.HasValue
-                    ? $", ExpiresAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}"
-                    : ", ExpiresAt=Never";
-
-                _logger.Debug($"READ HIT: Key='{key}', Value={valueLog}, Frequency={oldFrequency}->{item.Frequency}{expirationLog} {GetCacheStats()}");
+                _logger.Debug($"READ MISS: Key='{key}' not found {GetCacheStats()}");
+                return null;
             }
+
+            if (item.IsExpired)
+            {
+                RemoveFromFrequencyBucket(key, item.Frequency);
+                _cache.TryRemove(key, out _);
+
+                string expiredValueLog = SerializeValueForLog(item.Value);
+                _logger.Info($"READ EXPIRED: Key='{key}', Value={expiredValueLog}, ExpiredAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}, Frequency={item.Frequency} {GetCacheStats()}");
+
+                EventNotifier.RaiseItemExpired(key);
+                return null;
+            }
+
+            int oldFrequency = item.Frequency;
+            IncrementFrequency(key, item);
+
+            string valueLog = SerializeValueForLog(item.Value);
+            string expirationLog = item.ExpiresAt.HasValue
+                ? $", ExpiresAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}"
+                : ", ExpiresAt=Never";
+
+            _logger.Debug($"READ HIT: Key='{key}', Value={valueLog}, Frequency={oldFrequency}->{item.Frequency}{expirationLog} {GetCacheStats()}");
 
             return item.Value;
         }
-
-        _logger.Debug($"READ MISS: Key='{key}' not found {GetCacheStats()}");
-
-        return null;
     }
 
     public bool Update(string key, object value, int? expirationSeconds = null)
@@ -385,6 +376,29 @@ public class CacheManager : ICacheManager
                 _minFrequency = _frequencyBuckets.Count > 0 ? _frequencyBuckets.Keys.Min() : 0;
             }
         }
+    }
+
+    #endregion
+
+    #region IDisposable
+
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    private void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+
+        if (disposing)
+        {
+            _cleanupTimer?.Dispose();
+            _logger.Info("CacheManager disposed");
+        }
+
+        _disposed = true;
     }
 
     #endregion

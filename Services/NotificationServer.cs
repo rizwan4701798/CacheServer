@@ -8,20 +8,23 @@ using Manager;
 using Newtonsoft.Json;
 
 namespace CacheServer.Server;
-public class NotificationServer
+
+public sealed class NotificationServer
 {
     private readonly TcpListener _listener;
     private readonly ICacheManager _cacheManager;
-    private readonly ConcurrentDictionary<string, NotificationClient> _subscribers;
-    private readonly ILog _logger;
-    private bool _isRunning;
+    private readonly ConcurrentDictionary<string, NotificationClient> _subscribers = new();
+    private readonly ILog _logger = LogManager.GetLogger(typeof(NotificationServer));
+    private volatile bool _isRunning;
 
     public NotificationServer(int port, ICacheManager cacheManager)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(port);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        ArgumentNullException.ThrowIfNull(cacheManager);
+
         _listener = new TcpListener(IPAddress.Any, port);
         _cacheManager = cacheManager;
-        _subscribers = new ConcurrentDictionary<string, NotificationClient>();
-        _logger = LogManager.GetLogger(typeof(NotificationServer));
 
         _cacheManager.EventNotifier.CacheEventOccurred += OnCacheEvent;
     }
@@ -32,7 +35,7 @@ public class NotificationServer
         _listener.Start();
         _logger.Info($"Notification server started on port {((IPEndPoint)_listener.LocalEndpoint).Port}.");
 
-        Task.Run(AcceptClientsAsync);
+        _ = Task.Run(AcceptClientsAsync);
     }
 
     public void Stop()
@@ -46,7 +49,10 @@ public class NotificationServer
             {
                 client.TcpClient.Close();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.Debug($"Error closing client connection: {ex.Message}");
+            }
         }
         _subscribers.Clear();
 
@@ -59,7 +65,7 @@ public class NotificationServer
         {
             try
             {
-                var tcpClient = await _listener.AcceptTcpClientAsync();
+                var tcpClient = await _listener.AcceptTcpClientAsync().ConfigureAwait(false);
                 var clientId = Guid.NewGuid().ToString();
                 var notificationClient = new NotificationClient(clientId, tcpClient);
 
@@ -85,13 +91,13 @@ public class NotificationServer
 
             while (client.TcpClient.Connected && _isRunning)
             {
-                int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                int bytesRead = await stream.ReadAsync(buffer).ConfigureAwait(false);
                 if (bytesRead == 0) break;
 
                 string json = Encoding.UTF8.GetString(buffer, 0, bytesRead);
                 var request = JsonConvert.DeserializeObject<CacheRequest>(json);
 
-                if (request.Operation?.ToUpper() == "SUBSCRIBE")
+                if (request?.Operation?.ToUpperInvariant() == "SUBSCRIBE")
                 {
                     client.SubscribedEvents = request.SubscribedEventTypes?
                         .Select(e => Enum.Parse<CacheEventType>(e))
@@ -101,9 +107,9 @@ public class NotificationServer
                     _logger.Info($"Client {client.Id} subscribed to events: {string.Join(", ", client.SubscribedEvents)}");
 
                     var ack = new CacheResponse { Success = true };
-                    await SendToClientAsync(client, ack);
+                    await SendToClientAsync(client, ack).ConfigureAwait(false);
                 }
-                else if (request.Operation?.ToUpper() == "UNSUBSCRIBE")
+                else if (request?.Operation?.ToUpperInvariant() == "UNSUBSCRIBE")
                 {
                     _logger.Info($"Client {client.Id} unsubscribed.");
                     _subscribers.TryRemove(client.Id, out _);
@@ -119,12 +125,19 @@ public class NotificationServer
         finally
         {
             _subscribers.TryRemove(client.Id, out _);
-            try { client.TcpClient.Close(); } catch { }
+            try
+            {
+                client.TcpClient.Close();
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"Error closing client {client.Id}: {ex.Message}");
+            }
             _logger.Debug($"Notification client {client.Id} removed.");
         }
     }
 
-    private void OnCacheEvent(object sender, CacheEvent cacheEvent)
+    private void OnCacheEvent(object? sender, CacheEvent cacheEvent)
     {
         var notification = new CacheResponse
         {
@@ -161,7 +174,14 @@ public class NotificationServer
         {
             if (_subscribers.TryRemove(clientId, out var client))
             {
-                try { client.TcpClient.Close(); } catch { }
+                try
+                {
+                    client.TcpClient.Close();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug($"Error closing client {clientId}: {ex.Message}");
+                }
             }
         }
     }
@@ -171,7 +191,7 @@ public class NotificationServer
         if (!client.TcpClient.Connected) return;
 
         var json = JsonConvert.SerializeObject(response);
-        var bytes = Encoding.UTF8.GetBytes(json + "\n"); 
+        var bytes = Encoding.UTF8.GetBytes(json + "\n");
 
         lock (client.WriteLock)
         {
@@ -189,38 +209,32 @@ public class NotificationServer
         var bytes = Encoding.UTF8.GetBytes(json + "\n");
 
         var stream = client.TcpClient.GetStream();
-        await stream.WriteAsync(bytes, 0, bytes.Length);
-        await stream.FlushAsync();
+        await stream.WriteAsync(bytes).ConfigureAwait(false);
+        await stream.FlushAsync().ConfigureAwait(false);
     }
 
-    private bool MatchesPattern(string key, string pattern)
+    private static bool MatchesPattern(string key, string pattern)
     {
         if (string.IsNullOrEmpty(pattern)) return true;
         if (string.IsNullOrEmpty(key)) return false;
 
-        if (pattern.EndsWith("*"))
+        if (pattern.EndsWith('*'))
         {
-            return key.StartsWith(pattern.TrimEnd('*'));
+            return key.StartsWith(pattern.TrimEnd('*'), StringComparison.Ordinal);
         }
 
         // Exact match
-        return key == pattern;
+        return string.Equals(key, pattern, StringComparison.Ordinal);
     }
 
     public int SubscriberCount => _subscribers.Count;
 }
 
-internal class NotificationClient
+internal sealed class NotificationClient(string id, TcpClient tcpClient)
 {
-    public string Id { get; }
-    public TcpClient TcpClient { get; }
-    public HashSet<CacheEventType> SubscribedEvents { get; set; } = new();
-    public string KeyPattern { get; set; }
+    public string Id { get; } = id;
+    public TcpClient TcpClient { get; } = tcpClient;
+    public HashSet<CacheEventType> SubscribedEvents { get; set; } = [];
+    public string? KeyPattern { get; set; }
     public object WriteLock { get; } = new();
-
-    public NotificationClient(string id, TcpClient tcpClient)
-    {
-        Id = id;
-        TcpClient = tcpClient;
-    }
 }

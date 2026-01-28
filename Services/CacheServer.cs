@@ -8,15 +8,20 @@ using CacheServerModels;
 
 namespace CacheServer.Server;
 
-public class CacheServer
+public sealed class CacheServer
 {
     private readonly TcpListener _listener;
     private readonly ICacheManager _cacheManager;
     private readonly ILog _logger;
-    private bool _isRunning;
+    private volatile bool _isRunning;
+    private Task? _listenerTask;
 
     public CacheServer(int port, ICacheManager cacheManager)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(port);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        ArgumentNullException.ThrowIfNull(cacheManager);
+
         _listener = new TcpListener(IPAddress.Any, port);
         _cacheManager = cacheManager;
         _logger = LogManager.GetLogger(typeof(CacheServer));
@@ -28,8 +33,7 @@ public class CacheServer
         _listener.Start();
         _logger.Info(CacheServerConstants.CacheServerStarted);
 
-        Thread listenerThread = new Thread(ListenForClients);
-        listenerThread.Start();
+        _listenerTask = Task.Run(ListenForClientsAsync);
     }
 
     public void Stop()
@@ -39,14 +43,14 @@ public class CacheServer
         _logger.Info(CacheServerConstants.CacheServerStopped);
     }
 
-    private void ListenForClients()
+    private async Task ListenForClientsAsync()
     {
         while (_isRunning)
         {
             try
             {
-                var client = _listener.AcceptTcpClient();
-                ThreadPool.QueueUserWorkItem(HandleClient, client);
+                var client = await _listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                _ = Task.Run(() => HandleClientAsync(client));
             }
             catch (Exception ex)
             {
@@ -56,25 +60,23 @@ public class CacheServer
         }
     }
 
-    private void HandleClient(object obj)
+    private async Task HandleClientAsync(TcpClient client)
     {
-        TcpClient client = (TcpClient)obj;
-
         try
         {
-            using var stream = client.GetStream();
-            byte[] buffer = new byte[4096];
-            int bytesRead = stream.Read(buffer, 0, buffer.Length);
+            await using var stream = client.GetStream();
+            var buffer = new byte[4096];
+            int bytesRead = await stream.ReadAsync(buffer).ConfigureAwait(false);
 
             string requestJson = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-            CacheRequest request = JsonConvert.DeserializeObject<CacheRequest>(requestJson);
+            var request = JsonConvert.DeserializeObject<CacheRequest>(requestJson);
 
             CacheResponse response = ProcessRequest(request);
 
             string responseJson = JsonConvert.SerializeObject(response);
             byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
 
-            stream.Write(responseBytes, 0, responseBytes.Length);
+            await stream.WriteAsync(responseBytes).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -86,17 +88,22 @@ public class CacheServer
         }
     }
 
-    internal CacheResponse ProcessRequest(CacheRequest request)
+    internal CacheResponse ProcessRequest(CacheRequest? request)
     {
+        if (request is null)
+        {
+            return new CacheResponse { Success = false, Error = "Invalid request" };
+        }
+
         try
         {
-            return request.Operation.ToUpper() switch
+            return request.Operation?.ToUpperInvariant() switch
             {
-                CacheServerConstants.CREATE => new CacheResponse { Success = _cacheManager.Create(request.Key, request.Value, request.ExpirationSeconds) },
-                CacheServerConstants.READ => new CacheResponse { Success = true, Value = _cacheManager.Read(request.Key) },
-                CacheServerConstants.UPDATE => new CacheResponse { Success = _cacheManager.Update(request.Key, request.Value, request.ExpirationSeconds) },
-                CacheServerConstants.DELETE=> new CacheResponse { Success = _cacheManager.Delete(request.Key) },
-                _ => new CacheResponse { Success = false, Error = CacheServerConstants.InvalidOperation}
+                CacheServerConstants.CREATE => new CacheResponse { Success = _cacheManager.Create(request.Key!, request.Value, request.ExpirationSeconds) },
+                CacheServerConstants.READ => new CacheResponse { Success = true, Value = _cacheManager.Read(request.Key!) },
+                CacheServerConstants.UPDATE => new CacheResponse { Success = _cacheManager.Update(request.Key!, request.Value, request.ExpirationSeconds) },
+                CacheServerConstants.DELETE => new CacheResponse { Success = _cacheManager.Delete(request.Key!) },
+                _ => new CacheResponse { Success = false, Error = CacheServerConstants.InvalidOperation }
             };
         }
         catch (Exception ex)

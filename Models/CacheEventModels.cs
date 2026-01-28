@@ -9,11 +9,11 @@ public enum CacheEventType
     ItemEvicted
 }
 
-public class CacheEvent
+public sealed class CacheEvent
 {
     public CacheEventType EventType { get; set; }
-    public string Key { get; set; }
-    public object Value { get; set; }
+    public string Key { get; set; } = string.Empty;
+    public object? Value { get; set; }
     public DateTime Timestamp { get; set; }
-    public string Reason { get; set; }
+    public string? Reason { get; set; }
 }

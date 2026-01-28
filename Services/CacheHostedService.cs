@@ -4,27 +4,19 @@ using Microsoft.Extensions.Hosting;
 using log4net;
 using CacheServer.Server;
 
-public class CacheHostedService : IHostedService
+/// <summary>
+/// Hosted service that manages the cache server and notification server lifecycle.
+/// </summary>
+public sealed class CacheHostedService(
+    IConfiguration configuration,
+    ICacheManager cacheManager) : IHostedService
 {
-    private readonly ILog _logger;
+    private readonly ILog _logger = LogManager.GetLogger(typeof(CacheHostedService));
+    private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+    private readonly ICacheManager _cacheManager = cacheManager ?? throw new ArgumentNullException(nameof(cacheManager));
 
-    private readonly IConfiguration _configuration;
-    private readonly ICacheManager _cacheManager;
     private CacheServer.Server.CacheServer? _cacheServer;
     private NotificationServer? _notificationServer;
-
-    public CacheHostedService(
-        IConfiguration configuration,
-        ICacheManager cacheManager)
-    {
-        _configuration = configuration
-            ?? throw new ArgumentNullException(nameof(configuration));
-
-        _logger = LogManager.GetLogger(typeof(CacheHostedService));
-
-        _cacheManager = cacheManager
-            ?? throw new ArgumentNullException(nameof(cacheManager));
-    }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -82,6 +74,13 @@ public class CacheHostedService : IHostedService
             // Then stop Cache Server
             _cacheServer?.Stop();
             _logger.Info("Cache Server stopped");
+
+            // Dispose CacheManager if it implements IDisposable
+            if (_cacheManager is IDisposable disposableCacheManager)
+            {
+                disposableCacheManager.Dispose();
+                _logger.Info("CacheManager disposed");
+            }
 
             _logger.Info("All servers stopped successfully");
         }

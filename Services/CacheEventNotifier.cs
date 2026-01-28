@@ -6,23 +6,18 @@ namespace Manager;
 /// <summary>
 /// Implementation of cache event notifier that raises events for cache operations.
 /// </summary>
-public class CacheEventNotifier : ICacheEventNotifier
+public sealed class CacheEventNotifier : ICacheEventNotifier
 {
-    private readonly ILog _logger;
+    private readonly ILog _logger = LogManager.GetLogger(typeof(CacheEventNotifier));
 
-    public event EventHandler<CacheEvent> CacheEventOccurred;
+    public event EventHandler<CacheEvent>? CacheEventOccurred;
 
-    public CacheEventNotifier()
-    {
-        _logger = LogManager.GetLogger(typeof(CacheEventNotifier));
-    }
-
-    public void RaiseItemAdded(string key, object value)
+    public void RaiseItemAdded(string key, object? value)
     {
         RaiseEvent(CacheEventType.ItemAdded, key, value);
     }
 
-    public void RaiseItemUpdated(string key, object value)
+    public void RaiseItemUpdated(string key, object? value)
     {
         RaiseEvent(CacheEventType.ItemUpdated, key, value);
     }
@@ -42,7 +37,7 @@ public class CacheEventNotifier : ICacheEventNotifier
         RaiseEvent(CacheEventType.ItemEvicted, key, null, reason);
     }
 
-    private void RaiseEvent(CacheEventType eventType, string key, object value, string reason = null)
+    private void RaiseEvent(CacheEventType eventType, string key, object? value, string? reason = null)
     {
         var cacheEvent = new CacheEvent
         {
