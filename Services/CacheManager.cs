@@ -27,6 +27,9 @@ public class CacheManager : ICacheManager
     private readonly Dictionary<string, LinkedListNode<string>> _keyNodes;
     private int _minFrequency;
 
+    // Event notifier for cache events
+    public ICacheEventNotifier EventNotifier { get; }
+
     public CacheManager(int maxItems)
     {
         _logger = LogManager.GetLogger(typeof(CacheManager));
@@ -46,6 +49,9 @@ public class CacheManager : ICacheManager
         _frequencyBuckets = new SortedDictionary<int, LinkedList<string>>();
         _keyNodes = new Dictionary<string, LinkedListNode<string>>();
         _minFrequency = 0;
+
+        // Initialize event notifier
+        EventNotifier = new CacheEventNotifier();
 
         // Background cleanup every 60 seconds
         _cleanupTimer = new Timer(
@@ -109,6 +115,9 @@ public class CacheManager : ICacheManager
                 {
                     _logger.Debug($"Key '{key}' will expire in {expirationSeconds.Value} seconds.");
                 }
+
+                // Raise ItemAdded event
+                EventNotifier.RaiseItemAdded(key, value);
             }
             else
             {
@@ -140,6 +149,9 @@ public class CacheManager : ICacheManager
                     RemoveFromFrequencyBucket(key, item.Frequency);
                     _cache.TryRemove(key, out _);
                     _logger.Debug($"Key '{key}' expired and removed on read.");
+
+                    // Raise ItemExpired event
+                    EventNotifier.RaiseItemExpired(key);
                     return null;
                 }
 
@@ -187,6 +199,9 @@ public class CacheManager : ICacheManager
                 RemoveFromFrequencyBucket(key, existingItem.Frequency);
                 _cache.TryRemove(key, out _);
                 _logger.Debug($"Key '{key}' expired and removed on update attempt.");
+
+                // Raise ItemExpired event
+                EventNotifier.RaiseItemExpired(key);
                 return false;
             }
 
@@ -206,6 +221,9 @@ public class CacheManager : ICacheManager
             {
                 _logger.Debug($"Key '{key}' expiration updated to {expirationSeconds.Value} seconds.");
             }
+
+            // Raise ItemUpdated event
+            EventNotifier.RaiseItemUpdated(key, value);
 
             return true;
         }
@@ -234,6 +252,9 @@ public class CacheManager : ICacheManager
                     string.Format(
                         CacheServerConstants.DeleteSuccess,
                         key));
+
+                // Raise ItemRemoved event
+                EventNotifier.RaiseItemRemoved(key);
             }
             else
             {
@@ -260,6 +281,9 @@ public class CacheManager : ICacheManager
                 RemoveFromFrequencyBucket(kvp.Key, kvp.Value.Frequency);
                 _cache.TryRemove(kvp.Key, out _);
                 _logger.Debug($"Expired item '{kvp.Key}' cleaned up by background task.");
+
+                // Raise ItemExpired event
+                EventNotifier.RaiseItemExpired(kvp.Key);
             }
 
             if (expiredItems.Count > 0)
@@ -338,6 +362,9 @@ public class CacheManager : ICacheManager
             _cache.TryRemove(keyToEvict, out _);
 
             _logger.Info($"LFU eviction: removed key '{keyToEvict}' with frequency {_minFrequency}.");
+
+            // Raise ItemEvicted event
+            EventNotifier.RaiseItemEvicted(keyToEvict, $"LFU eviction (frequency: {_minFrequency})");
 
             // Update min frequency if bucket is now empty
             if (!_frequencyBuckets.ContainsKey(_minFrequency) || _frequencyBuckets[_minFrequency].Count == 0)

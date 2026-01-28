@@ -7,5 +7,10 @@ public interface ICacheManager
     object Read(string key);
     bool Update(string key, object value, int? expirationSeconds = null);
     bool Delete(string key);
+
+    /// <summary>
+    /// Gets the event notifier for cache events.
+    /// </summary>
+    ICacheEventNotifier EventNotifier { get; }
 }
 
