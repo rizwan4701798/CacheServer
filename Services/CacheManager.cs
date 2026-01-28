@@ -7,6 +7,8 @@ internal class CacheItem
 {
     public object Value { get; set; }
     public DateTime? ExpiresAt { get; set; }
+    public int Frequency { get; set; }
+    public DateTime LastAccessedAt { get; set; }
 
     public bool IsExpired => ExpiresAt.HasValue && DateTime.UtcNow > ExpiresAt.Value;
 }
@@ -18,6 +20,12 @@ public class CacheManager : ICacheManager
     private readonly int _maxItems;
     private readonly object _capacityLock = new();
     private readonly Timer _cleanupTimer;
+
+    // LFU tracking: frequency -> set of keys with that frequency (ordered by access time)
+    private readonly SortedDictionary<int, LinkedList<string>> _frequencyBuckets;
+    // Quick lookup: key -> node in the linked list (for O(1) removal)
+    private readonly Dictionary<string, LinkedListNode<string>> _keyNodes;
+    private int _minFrequency;
 
     public CacheManager(int maxItems)
     {
@@ -33,6 +41,11 @@ public class CacheManager : ICacheManager
 
         _maxItems = maxItems;
         _cache = new ConcurrentDictionary<string, CacheItem>();
+
+        // Initialize LFU tracking
+        _frequencyBuckets = new SortedDictionary<int, LinkedList<string>>();
+        _keyNodes = new Dictionary<string, LinkedListNode<string>>();
+        _minFrequency = 0;
 
         // Background cleanup every 60 seconds
         _cleanupTimer = new Timer(
@@ -57,16 +70,16 @@ public class CacheManager : ICacheManager
 
         lock (_capacityLock)
         {
+            // If at capacity, evict least frequently used item
             if (_cache.Count >= _maxItems)
             {
-                _logger.Warn(
-                     string.Format(
-                     CacheServerConstants.CacheCapacityReached,
-                    _maxItems,
-                    _cache.Count));
+                _logger.Debug(
+                    string.Format(
+                        CacheServerConstants.CacheCapacityReached,
+                        _maxItems,
+                        _cache.Count));
 
-                throw new InvalidOperationException(
-                    CacheServerConstants.CacheIsFull);
+                EvictLeastFrequentlyUsed();
             }
 
             var item = new CacheItem
@@ -74,13 +87,19 @@ public class CacheManager : ICacheManager
                 Value = value,
                 ExpiresAt = expirationSeconds.HasValue
                     ? DateTime.UtcNow.AddSeconds(expirationSeconds.Value)
-                    : null
+                    : null,
+                Frequency = 1,
+                LastAccessedAt = DateTime.UtcNow
             };
 
             bool added = _cache.TryAdd(key, item);
 
             if (added)
             {
+                // Add to frequency bucket 1
+                AddToFrequencyBucket(key, 1);
+                _minFrequency = 1;
+
                 _logger.Info(
                     string.Format(
                         CacheServerConstants.CreateSuccess,
@@ -113,12 +132,19 @@ public class CacheManager : ICacheManager
 
         if (_cache.TryGetValue(key, out var item))
         {
-            // Lazy expiration check
-            if (item.IsExpired)
+            lock (_capacityLock)
             {
-                _cache.TryRemove(key, out _);
-                _logger.Debug($"Key '{key}' expired and removed on read.");
-                return null;
+                // Lazy expiration check
+                if (item.IsExpired)
+                {
+                    RemoveFromFrequencyBucket(key, item.Frequency);
+                    _cache.TryRemove(key, out _);
+                    _logger.Debug($"Key '{key}' expired and removed on read.");
+                    return null;
+                }
+
+                // Increment frequency (LFU tracking)
+                IncrementFrequency(key, item);
             }
 
             _logger.Debug(
@@ -144,44 +170,45 @@ public class CacheManager : ICacheManager
             return false;
         }
 
-        if (!_cache.TryGetValue(key, out var existingItem))
+        lock (_capacityLock)
         {
-            _logger.Warn(
-                string.Format(
-                    CacheServerConstants.UpdateMissingKey,
-                    key));
-            return false;
-        }
+            if (!_cache.TryGetValue(key, out var existingItem))
+            {
+                _logger.Warn(
+                    string.Format(
+                        CacheServerConstants.UpdateMissingKey,
+                        key));
+                return false;
+            }
 
-        // Check if expired
-        if (existingItem.IsExpired)
-        {
-            _cache.TryRemove(key, out _);
-            _logger.Debug($"Key '{key}' expired and removed on update attempt.");
-            return false;
-        }
+            // Check if expired
+            if (existingItem.IsExpired)
+            {
+                RemoveFromFrequencyBucket(key, existingItem.Frequency);
+                _cache.TryRemove(key, out _);
+                _logger.Debug($"Key '{key}' expired and removed on update attempt.");
+                return false;
+            }
 
-        var newItem = new CacheItem
-        {
-            Value = value,
-            ExpiresAt = expirationSeconds.HasValue
+            // Keep the same frequency but update last accessed time
+            existingItem.Value = value;
+            existingItem.LastAccessedAt = DateTime.UtcNow;
+            existingItem.ExpiresAt = expirationSeconds.HasValue
                 ? DateTime.UtcNow.AddSeconds(expirationSeconds.Value)
-                : existingItem.ExpiresAt  // Keep existing expiration if not specified
-        };
+                : existingItem.ExpiresAt;
 
-        _cache[key] = newItem;
+            _logger.Info(
+                string.Format(
+                    CacheServerConstants.UpdateSuccess,
+                    key));
 
-        _logger.Info(
-            string.Format(
-                CacheServerConstants.UpdateSuccess,
-                key));
+            if (expirationSeconds.HasValue)
+            {
+                _logger.Debug($"Key '{key}' expiration updated to {expirationSeconds.Value} seconds.");
+            }
 
-        if (expirationSeconds.HasValue)
-        {
-            _logger.Debug($"Key '{key}' expiration updated to {expirationSeconds.Value} seconds.");
+            return true;
         }
-
-        return true;
     }
 
     public bool Delete(string key)
@@ -192,42 +219,134 @@ public class CacheManager : ICacheManager
             return false;
         }
 
-        bool removed = _cache.TryRemove(key, out _);
-
-        if (removed)
+        lock (_capacityLock)
         {
-            _logger.Info(
-                string.Format(
-                    CacheServerConstants.DeleteSuccess,
-                    key));
-        }
-        else
-        {
-            _logger.Warn(
-                string.Format(
-                    CacheServerConstants.DeleteMissingKey,
-                    key));
-        }
+            if (_cache.TryGetValue(key, out var item))
+            {
+                RemoveFromFrequencyBucket(key, item.Frequency);
+            }
 
-        return removed;
+            bool removed = _cache.TryRemove(key, out _);
+
+            if (removed)
+            {
+                _logger.Info(
+                    string.Format(
+                        CacheServerConstants.DeleteSuccess,
+                        key));
+            }
+            else
+            {
+                _logger.Warn(
+                    string.Format(
+                        CacheServerConstants.DeleteMissingKey,
+                        key));
+            }
+
+            return removed;
+        }
     }
 
     private void CleanupExpiredItems(object state)
     {
-        var expiredKeys = _cache
-            .Where(kvp => kvp.Value.IsExpired)
-            .Select(kvp => kvp.Key)
-            .ToList();
-
-        foreach (var key in expiredKeys)
+        lock (_capacityLock)
         {
-            _cache.TryRemove(key, out _);
-            _logger.Debug($"Expired item '{key}' cleaned up by background task.");
-        }
+            var expiredItems = _cache
+                .Where(kvp => kvp.Value.IsExpired)
+                .ToList();
 
-        if (expiredKeys.Count > 0)
-        {
-            _logger.Info($"Background cleanup removed {expiredKeys.Count} expired item(s).");
+            foreach (var kvp in expiredItems)
+            {
+                RemoveFromFrequencyBucket(kvp.Key, kvp.Value.Frequency);
+                _cache.TryRemove(kvp.Key, out _);
+                _logger.Debug($"Expired item '{kvp.Key}' cleaned up by background task.");
+            }
+
+            if (expiredItems.Count > 0)
+            {
+                _logger.Info($"Background cleanup removed {expiredItems.Count} expired item(s).");
+            }
         }
     }
+
+    #region LFU Helper Methods
+
+    private void AddToFrequencyBucket(string key, int frequency)
+    {
+        if (!_frequencyBuckets.TryGetValue(frequency, out var bucket))
+        {
+            bucket = new LinkedList<string>();
+            _frequencyBuckets[frequency] = bucket;
+        }
+
+        var node = bucket.AddLast(key);
+        _keyNodes[key] = node;
+    }
+
+    private void RemoveFromFrequencyBucket(string key, int frequency)
+    {
+        if (_keyNodes.TryGetValue(key, out var node))
+        {
+            if (_frequencyBuckets.TryGetValue(frequency, out var bucket))
+            {
+                bucket.Remove(node);
+
+                // Clean up empty bucket
+                if (bucket.Count == 0)
+                {
+                    _frequencyBuckets.Remove(frequency);
+                }
+            }
+            _keyNodes.Remove(key);
+        }
+    }
+
+    private void IncrementFrequency(string key, CacheItem item)
+    {
+        int oldFreq = item.Frequency;
+        int newFreq = oldFreq + 1;
+
+        // Remove from old bucket
+        RemoveFromFrequencyBucket(key, oldFreq);
+
+        // Update min frequency if needed
+        if (oldFreq == _minFrequency &&
+            (!_frequencyBuckets.ContainsKey(oldFreq) || _frequencyBuckets[oldFreq].Count == 0))
+        {
+            _minFrequency = newFreq;
+        }
+
+        // Add to new bucket
+        AddToFrequencyBucket(key, newFreq);
+
+        // Update item
+        item.Frequency = newFreq;
+        item.LastAccessedAt = DateTime.UtcNow;
+    }
+
+    private void EvictLeastFrequentlyUsed()
+    {
+        if (_frequencyBuckets.TryGetValue(_minFrequency, out var bucket) && bucket.Count > 0)
+        {
+            // Get the first item (oldest among lowest frequency - LRU tie-breaker)
+            string keyToEvict = bucket.First.Value;
+
+            // Remove from tracking
+            RemoveFromFrequencyBucket(keyToEvict, _minFrequency);
+
+            // Remove from cache
+            _cache.TryRemove(keyToEvict, out _);
+
+            _logger.Info($"LFU eviction: removed key '{keyToEvict}' with frequency {_minFrequency}.");
+
+            // Update min frequency if bucket is now empty
+            if (!_frequencyBuckets.ContainsKey(_minFrequency) || _frequencyBuckets[_minFrequency].Count == 0)
+            {
+                // Find next minimum frequency
+                _minFrequency = _frequencyBuckets.Count > 0 ? _frequencyBuckets.Keys.Min() : 0;
+            }
+        }
+    }
+
+    #endregion
 }
