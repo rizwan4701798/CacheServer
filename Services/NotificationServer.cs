@@ -8,10 +8,6 @@ using Manager;
 using Newtonsoft.Json;
 
 namespace CacheServer.Server;
-
-/// <summary>
-/// Server for handling client notification subscriptions and pushing cache events.
-/// </summary>
 public class NotificationServer
 {
     private readonly TcpListener _listener;
@@ -27,7 +23,6 @@ public class NotificationServer
         _subscribers = new ConcurrentDictionary<string, NotificationClient>();
         _logger = LogManager.GetLogger(typeof(NotificationServer));
 
-        // Subscribe to cache events
         _cacheManager.EventNotifier.CacheEventOccurred += OnCacheEvent;
     }
 
@@ -45,7 +40,6 @@ public class NotificationServer
         _isRunning = false;
         _listener.Stop();
 
-        // Close all subscriber connections
         foreach (var client in _subscribers.Values)
         {
             try
@@ -72,7 +66,6 @@ public class NotificationServer
                 _subscribers.TryAdd(clientId, notificationClient);
                 _logger.Info($"Notification client connected: {clientId}");
 
-                // Start listening for subscription requests from this client
                 _ = HandleClientAsync(notificationClient);
             }
             catch (Exception ex)
@@ -107,7 +100,6 @@ public class NotificationServer
 
                     _logger.Info($"Client {client.Id} subscribed to events: {string.Join(", ", client.SubscribedEvents)}");
 
-                    // Send acknowledgment
                     var ack = new CacheResponse { Success = true };
                     await SendToClientAsync(client, ack);
                 }
@@ -147,18 +139,15 @@ public class NotificationServer
         {
             var client = kvp.Value;
 
-            // Check if client is subscribed to this event type
             if (client.SubscribedEvents.Count > 0 && !client.SubscribedEvents.Contains(cacheEvent.EventType))
                 continue;
 
-            // Check key pattern filter
             if (!string.IsNullOrEmpty(client.KeyPattern) &&
                 !MatchesPattern(cacheEvent.Key, client.KeyPattern))
                 continue;
 
             try
             {
-                // Send notification synchronously to avoid blocking issues
                 SendToClient(client, notification);
             }
             catch (Exception ex)
@@ -168,7 +157,6 @@ public class NotificationServer
             }
         }
 
-        // Clean up disconnected clients
         foreach (var clientId in clientsToRemove)
         {
             if (_subscribers.TryRemove(clientId, out var client))
@@ -183,7 +171,7 @@ public class NotificationServer
         if (!client.TcpClient.Connected) return;
 
         var json = JsonConvert.SerializeObject(response);
-        var bytes = Encoding.UTF8.GetBytes(json + "\n"); // Add newline as message delimiter
+        var bytes = Encoding.UTF8.GetBytes(json + "\n"); 
 
         lock (client.WriteLock)
         {
@@ -210,7 +198,6 @@ public class NotificationServer
         if (string.IsNullOrEmpty(pattern)) return true;
         if (string.IsNullOrEmpty(key)) return false;
 
-        // Simple wildcard matching (e.g., "user:*" matches "user:123")
         if (pattern.EndsWith("*"))
         {
             return key.StartsWith(pattern.TrimEnd('*'));
@@ -220,15 +207,9 @@ public class NotificationServer
         return key == pattern;
     }
 
-    /// <summary>
-    /// Gets the number of currently connected subscribers.
-    /// </summary>
     public int SubscriberCount => _subscribers.Count;
 }
 
-/// <summary>
-/// Represents a connected notification client.
-/// </summary>
 internal class NotificationClient
 {
     public string Id { get; }

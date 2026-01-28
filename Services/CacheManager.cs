@@ -102,7 +102,6 @@ public class CacheManager : ICacheManager
 
             if (added)
             {
-                // Add to frequency bucket 1
                 AddToFrequencyBucket(key, 1);
                 _minFrequency = 1;
 
@@ -116,7 +115,6 @@ public class CacheManager : ICacheManager
                     _logger.Debug($"Key '{key}' will expire in {expirationSeconds.Value} seconds.");
                 }
 
-                // Raise ItemAdded event
                 EventNotifier.RaiseItemAdded(key, value);
             }
             else
@@ -143,19 +141,16 @@ public class CacheManager : ICacheManager
         {
             lock (_capacityLock)
             {
-                // Lazy expiration check
                 if (item.IsExpired)
                 {
                     RemoveFromFrequencyBucket(key, item.Frequency);
                     _cache.TryRemove(key, out _);
                     _logger.Debug($"Key '{key}' expired and removed on read.");
 
-                    // Raise ItemExpired event
                     EventNotifier.RaiseItemExpired(key);
                     return null;
                 }
 
-                // Increment frequency (LFU tracking)
                 IncrementFrequency(key, item);
             }
 
@@ -193,19 +188,16 @@ public class CacheManager : ICacheManager
                 return false;
             }
 
-            // Check if expired
             if (existingItem.IsExpired)
             {
                 RemoveFromFrequencyBucket(key, existingItem.Frequency);
                 _cache.TryRemove(key, out _);
                 _logger.Debug($"Key '{key}' expired and removed on update attempt.");
 
-                // Raise ItemExpired event
                 EventNotifier.RaiseItemExpired(key);
                 return false;
             }
 
-            // Keep the same frequency but update last accessed time
             existingItem.Value = value;
             existingItem.LastAccessedAt = DateTime.UtcNow;
             existingItem.ExpiresAt = expirationSeconds.HasValue
@@ -222,7 +214,6 @@ public class CacheManager : ICacheManager
                 _logger.Debug($"Key '{key}' expiration updated to {expirationSeconds.Value} seconds.");
             }
 
-            // Raise ItemUpdated event
             EventNotifier.RaiseItemUpdated(key, value);
 
             return true;
@@ -253,7 +244,6 @@ public class CacheManager : ICacheManager
                         CacheServerConstants.DeleteSuccess,
                         key));
 
-                // Raise ItemRemoved event
                 EventNotifier.RaiseItemRemoved(key);
             }
             else
@@ -282,7 +272,6 @@ public class CacheManager : ICacheManager
                 _cache.TryRemove(kvp.Key, out _);
                 _logger.Debug($"Expired item '{kvp.Key}' cleaned up by background task.");
 
-                // Raise ItemExpired event
                 EventNotifier.RaiseItemExpired(kvp.Key);
             }
 
@@ -315,7 +304,6 @@ public class CacheManager : ICacheManager
             {
                 bucket.Remove(node);
 
-                // Clean up empty bucket
                 if (bucket.Count == 0)
                 {
                     _frequencyBuckets.Remove(frequency);
@@ -330,20 +318,16 @@ public class CacheManager : ICacheManager
         int oldFreq = item.Frequency;
         int newFreq = oldFreq + 1;
 
-        // Remove from old bucket
         RemoveFromFrequencyBucket(key, oldFreq);
 
-        // Update min frequency if needed
         if (oldFreq == _minFrequency &&
             (!_frequencyBuckets.ContainsKey(oldFreq) || _frequencyBuckets[oldFreq].Count == 0))
         {
             _minFrequency = newFreq;
         }
 
-        // Add to new bucket
         AddToFrequencyBucket(key, newFreq);
 
-        // Update item
         item.Frequency = newFreq;
         item.LastAccessedAt = DateTime.UtcNow;
     }
@@ -352,24 +336,18 @@ public class CacheManager : ICacheManager
     {
         if (_frequencyBuckets.TryGetValue(_minFrequency, out var bucket) && bucket.Count > 0)
         {
-            // Get the first item (oldest among lowest frequency - LRU tie-breaker)
             string keyToEvict = bucket.First.Value;
 
-            // Remove from tracking
             RemoveFromFrequencyBucket(keyToEvict, _minFrequency);
 
-            // Remove from cache
             _cache.TryRemove(keyToEvict, out _);
 
             _logger.Info($"LFU eviction: removed key '{keyToEvict}' with frequency {_minFrequency}.");
 
-            // Raise ItemEvicted event
             EventNotifier.RaiseItemEvicted(keyToEvict, $"LFU eviction (frequency: {_minFrequency})");
 
-            // Update min frequency if bucket is now empty
             if (!_frequencyBuckets.ContainsKey(_minFrequency) || _frequencyBuckets[_minFrequency].Count == 0)
             {
-                // Find next minimum frequency
                 _minFrequency = _frequencyBuckets.Count > 0 ? _frequencyBuckets.Keys.Min() : 0;
             }
         }

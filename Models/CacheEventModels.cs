@@ -1,8 +1,5 @@
 namespace CacheServerModels;
 
-/// <summary>
-/// Types of cache events that can be raised.
-/// </summary>
 public enum CacheEventType
 {
     ItemAdded,
@@ -12,9 +9,6 @@ public enum CacheEventType
     ItemEvicted
 }
 
-/// <summary>
-/// Represents a cache event notification.
-/// </summary>
 public class CacheEvent
 {
     public CacheEventType EventType { get; set; }
