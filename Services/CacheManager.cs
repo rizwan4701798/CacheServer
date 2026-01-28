@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using log4net;
+using Newtonsoft.Json;
 
 namespace Manager;
 
@@ -70,7 +71,7 @@ public class CacheManager : ICacheManager
     {
         if (string.IsNullOrWhiteSpace(key))
         {
-            _logger.Warn(CacheServerConstants.CreateEmptyKey);
+            _logger.Warn($"CREATE FAILED: Empty or null key provided, Value={SerializeValueForLog(value)}");
             return false;
         }
 
@@ -79,12 +80,7 @@ public class CacheManager : ICacheManager
             // If at capacity, evict least frequently used item
             if (_cache.Count >= _maxItems)
             {
-                _logger.Debug(
-                    string.Format(
-                        CacheServerConstants.CacheCapacityReached,
-                        _maxItems,
-                        _cache.Count));
-
+                _logger.Info($"CAPACITY REACHED: Cache full, triggering LFU eviction {GetCacheStats()}");
                 EvictLeastFrequentlyUsed();
             }
 
@@ -105,24 +101,18 @@ public class CacheManager : ICacheManager
                 AddToFrequencyBucket(key, 1);
                 _minFrequency = 1;
 
-                _logger.Info(
-                    string.Format(
-                        CacheServerConstants.CreateSuccess,
-                        key));
+                string valueLog = SerializeValueForLog(value);
+                string expirationLog = expirationSeconds.HasValue
+                    ? $", ExpiresIn={expirationSeconds.Value}s, ExpiresAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}"
+                    : ", ExpiresIn=Never";
 
-                if (expirationSeconds.HasValue)
-                {
-                    _logger.Debug($"Key '{key}' will expire in {expirationSeconds.Value} seconds.");
-                }
+                _logger.Info($"CREATE SUCCESS: Key='{key}', Value={valueLog}{expirationLog} {GetCacheStats()}");
 
                 EventNotifier.RaiseItemAdded(key, value);
             }
             else
             {
-                _logger.Warn(
-                    string.Format(
-                        CacheServerConstants.CreateDuplicate,
-                        key));
+                _logger.Warn($"CREATE FAILED (duplicate): Key='{key}' already exists {GetCacheStats()}");
             }
 
             return added;
@@ -133,7 +123,7 @@ public class CacheManager : ICacheManager
     {
         if (string.IsNullOrWhiteSpace(key))
         {
-            _logger.Warn(CacheServerConstants.ReadEmptyKey);
+            _logger.Warn("READ FAILED: Empty or null key provided");
             return null;
         }
 
@@ -145,26 +135,29 @@ public class CacheManager : ICacheManager
                 {
                     RemoveFromFrequencyBucket(key, item.Frequency);
                     _cache.TryRemove(key, out _);
-                    _logger.Debug($"Key '{key}' expired and removed on read.");
+
+                    string expiredValueLog = SerializeValueForLog(item.Value);
+                    _logger.Info($"READ EXPIRED: Key='{key}', Value={expiredValueLog}, ExpiredAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}, Frequency={item.Frequency} {GetCacheStats()}");
 
                     EventNotifier.RaiseItemExpired(key);
                     return null;
                 }
 
+                int oldFrequency = item.Frequency;
                 IncrementFrequency(key, item);
+
+                string valueLog = SerializeValueForLog(item.Value);
+                string expirationLog = item.ExpiresAt.HasValue
+                    ? $", ExpiresAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}"
+                    : ", ExpiresAt=Never";
+
+                _logger.Debug($"READ HIT: Key='{key}', Value={valueLog}, Frequency={oldFrequency}->{item.Frequency}{expirationLog} {GetCacheStats()}");
             }
 
-            _logger.Debug(
-                string.Format(
-                    CacheServerConstants.CacheHit,
-                    key));
             return item.Value;
         }
 
-        _logger.Debug(
-            string.Format(
-                CacheServerConstants.CacheMiss,
-                key));
+        _logger.Debug($"READ MISS: Key='{key}' not found {GetCacheStats()}");
 
         return null;
     }
@@ -173,7 +166,7 @@ public class CacheManager : ICacheManager
     {
         if (string.IsNullOrWhiteSpace(key))
         {
-            _logger.Warn(CacheServerConstants.UpdateEmptyKey);
+            _logger.Warn($"UPDATE FAILED: Empty or null key provided, Value={SerializeValueForLog(value)}");
             return false;
         }
 
@@ -181,10 +174,7 @@ public class CacheManager : ICacheManager
         {
             if (!_cache.TryGetValue(key, out var existingItem))
             {
-                _logger.Warn(
-                    string.Format(
-                        CacheServerConstants.UpdateMissingKey,
-                        key));
+                _logger.Warn($"UPDATE FAILED: Key='{key}' not found {GetCacheStats()}");
                 return false;
             }
 
@@ -192,11 +182,17 @@ public class CacheManager : ICacheManager
             {
                 RemoveFromFrequencyBucket(key, existingItem.Frequency);
                 _cache.TryRemove(key, out _);
-                _logger.Debug($"Key '{key}' expired and removed on update attempt.");
+
+                string expiredValueLog = SerializeValueForLog(existingItem.Value);
+                _logger.Info($"UPDATE EXPIRED: Key='{key}', OldValue={expiredValueLog}, ExpiredAt={existingItem.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC} {GetCacheStats()}");
 
                 EventNotifier.RaiseItemExpired(key);
                 return false;
             }
+
+            string oldValueLog = SerializeValueForLog(existingItem.Value);
+            string newValueLog = SerializeValueForLog(value);
+            DateTime? oldExpiration = existingItem.ExpiresAt;
 
             existingItem.Value = value;
             existingItem.LastAccessedAt = DateTime.UtcNow;
@@ -204,15 +200,11 @@ public class CacheManager : ICacheManager
                 ? DateTime.UtcNow.AddSeconds(expirationSeconds.Value)
                 : existingItem.ExpiresAt;
 
-            _logger.Info(
-                string.Format(
-                    CacheServerConstants.UpdateSuccess,
-                    key));
+            string expirationLog = expirationSeconds.HasValue
+                ? $", ExpiresIn={expirationSeconds.Value}s, ExpiresAt={existingItem.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}"
+                : (existingItem.ExpiresAt.HasValue ? $", ExpiresAt={existingItem.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}" : ", ExpiresAt=Never");
 
-            if (expirationSeconds.HasValue)
-            {
-                _logger.Debug($"Key '{key}' expiration updated to {expirationSeconds.Value} seconds.");
-            }
+            _logger.Info($"UPDATE SUCCESS: Key='{key}', OldValue={oldValueLog}, NewValue={newValueLog}, Frequency={existingItem.Frequency}{expirationLog} {GetCacheStats()}");
 
             EventNotifier.RaiseItemUpdated(key, value);
 
@@ -224,7 +216,7 @@ public class CacheManager : ICacheManager
     {
         if (string.IsNullOrWhiteSpace(key))
         {
-            _logger.Warn(CacheServerConstants.DeleteEmptyKey);
+            _logger.Warn("DELETE FAILED: Empty or null key provided");
             return false;
         }
 
@@ -233,28 +225,22 @@ public class CacheManager : ICacheManager
             if (_cache.TryGetValue(key, out var item))
             {
                 RemoveFromFrequencyBucket(key, item.Frequency);
-            }
 
-            bool removed = _cache.TryRemove(key, out _);
+                string valueLog = SerializeValueForLog(item.Value);
+                string expirationLog = item.ExpiresAt.HasValue
+                    ? $", ExpiresAt={item.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}"
+                    : ", ExpiresAt=Never";
 
-            if (removed)
-            {
-                _logger.Info(
-                    string.Format(
-                        CacheServerConstants.DeleteSuccess,
-                        key));
+                _cache.TryRemove(key, out _);
+
+                _logger.Info($"DELETE SUCCESS: Key='{key}', Value={valueLog}, Frequency={item.Frequency}{expirationLog} {GetCacheStats()}");
 
                 EventNotifier.RaiseItemRemoved(key);
-            }
-            else
-            {
-                _logger.Warn(
-                    string.Format(
-                        CacheServerConstants.DeleteMissingKey,
-                        key));
+                return true;
             }
 
-            return removed;
+            _logger.Warn($"DELETE FAILED: Key='{key}' not found {GetCacheStats()}");
+            return false;
         }
     }
 
@@ -270,17 +256,53 @@ public class CacheManager : ICacheManager
             {
                 RemoveFromFrequencyBucket(kvp.Key, kvp.Value.Frequency);
                 _cache.TryRemove(kvp.Key, out _);
-                _logger.Debug($"Expired item '{kvp.Key}' cleaned up by background task.");
+
+                string valueLog = SerializeValueForLog(kvp.Value.Value);
+                _logger.Info($"CLEANUP EXPIRED: Key='{kvp.Key}', Value={valueLog}, ExpiredAt={kvp.Value.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}, Frequency={kvp.Value.Frequency}");
 
                 EventNotifier.RaiseItemExpired(kvp.Key);
             }
 
             if (expiredItems.Count > 0)
             {
-                _logger.Info($"Background cleanup removed {expiredItems.Count} expired item(s).");
+                _logger.Info($"CLEANUP COMPLETE: Removed {expiredItems.Count} expired item(s) {GetCacheStats()}");
             }
         }
     }
+
+    #region Logging Helper Methods
+
+    /// <summary>
+    /// Safely serializes a value for logging, truncating if too long.
+    /// </summary>
+    private string SerializeValueForLog(object value, int maxLength = 200)
+    {
+        if (value == null) return "null";
+
+        try
+        {
+            string serialized = JsonConvert.SerializeObject(value);
+            if (serialized.Length > maxLength)
+            {
+                return serialized.Substring(0, maxLength) + "... [truncated]";
+            }
+            return serialized;
+        }
+        catch
+        {
+            return value.GetType().Name;
+        }
+    }
+
+    /// <summary>
+    /// Gets the current cache statistics for logging.
+    /// </summary>
+    private string GetCacheStats()
+    {
+        return $"[CacheCount={_cache.Count}/{_maxItems}]";
+    }
+
+    #endregion
 
     #region LFU Helper Methods
 
@@ -338,13 +360,25 @@ public class CacheManager : ICacheManager
         {
             string keyToEvict = bucket.First.Value;
 
-            RemoveFromFrequencyBucket(keyToEvict, _minFrequency);
+            if (_cache.TryGetValue(keyToEvict, out var itemToEvict))
+            {
+                string valueLog = SerializeValueForLog(itemToEvict.Value);
+                string expirationLog = itemToEvict.ExpiresAt.HasValue
+                    ? $", ExpiresAt={itemToEvict.ExpiresAt:yyyy-MM-dd HH:mm:ss UTC}"
+                    : ", ExpiresAt=Never";
 
-            _cache.TryRemove(keyToEvict, out _);
+                RemoveFromFrequencyBucket(keyToEvict, _minFrequency);
+                _cache.TryRemove(keyToEvict, out _);
 
-            _logger.Info($"LFU eviction: removed key '{keyToEvict}' with frequency {_minFrequency}.");
+                _logger.Info($"LFU EVICTION: Key='{keyToEvict}', Value={valueLog}, Frequency={_minFrequency}{expirationLog} {GetCacheStats()}");
 
-            EventNotifier.RaiseItemEvicted(keyToEvict, $"LFU eviction (frequency: {_minFrequency})");
+                EventNotifier.RaiseItemEvicted(keyToEvict, $"LFU eviction (frequency: {_minFrequency})");
+            }
+            else
+            {
+                RemoveFromFrequencyBucket(keyToEvict, _minFrequency);
+                _logger.Warn($"LFU EVICTION: Key='{keyToEvict}' was in frequency bucket but not in cache");
+            }
 
             if (!_frequencyBuckets.ContainsKey(_minFrequency) || _frequencyBuckets[_minFrequency].Count == 0)
             {
