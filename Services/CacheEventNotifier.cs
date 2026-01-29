@@ -3,9 +3,6 @@ using log4net;
 
 namespace Manager;
 
-/// <summary>
-/// Implementation of cache event notifier that raises events for cache operations.
-/// </summary>
 public sealed class CacheEventNotifier : ICacheEventNotifier
 {
     private readonly ILog _logger = LogManager.GetLogger(typeof(CacheEventNotifier));

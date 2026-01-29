@@ -4,9 +4,6 @@ using Microsoft.Extensions.Hosting;
 using log4net;
 using CacheServer.Server;
 
-/// <summary>
-/// Hosted service that manages the cache server and notification server lifecycle.
-/// </summary>
 public sealed class CacheHostedService(
     IConfiguration configuration,
     ICacheManager cacheManager) : IHostedService
@@ -30,7 +27,6 @@ public sealed class CacheHostedService(
                 CacheServerConstants.CacheSettingsNotificationPortConfigName,
                 5051);
 
-            // Start Cache Server
             _logger.Info($"Starting Cache Server on port {port}");
 
             _cacheServer = new CacheServer.Server.CacheServer(
@@ -41,7 +37,6 @@ public sealed class CacheHostedService(
 
             _logger.Info("Cache Server started successfully");
 
-            // Start Notification Server
             _logger.Info($"Starting Notification Server on port {notificationPort}");
 
             _notificationServer = new NotificationServer(
@@ -55,7 +50,7 @@ public sealed class CacheHostedService(
         catch (Exception ex)
         {
             _logger.Fatal("Server failed to start", ex);
-            throw; // Important: let host know startup failed
+            throw; 
         }
 
         return Task.CompletedTask;
@@ -67,15 +62,12 @@ public sealed class CacheHostedService(
         {
             _logger.Info("Stopping servers");
 
-            // Stop Notification Server first
             _notificationServer?.Stop();
             _logger.Info("Notification Server stopped");
 
-            // Then stop Cache Server
             _cacheServer?.Stop();
             _logger.Info("Cache Server stopped");
 
-            // Dispose CacheManager if it implements IDisposable
             if (_cacheManager is IDisposable disposableCacheManager)
             {
                 disposableCacheManager.Dispose();

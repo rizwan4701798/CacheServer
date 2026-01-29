@@ -8,15 +8,13 @@ public sealed class CacheManager : ICacheManager, IDisposable
     private readonly ILog _logger;
     private readonly Dictionary<string, CacheItem> _cache;
     private readonly int _maxItems;
-    private readonly object _capacityLock = new();
+    private readonly object _lock = new();
     private readonly Timer _cleanupTimer;
     private bool _disposed;
 
-    // LFU tracking: frequency -> set of keys with that frequency
     private readonly Dictionary<int, HashSet<string>> _frequencyBuckets;
     private int _minFrequency;
 
-    // Event notifier for cache events
     public ICacheEventNotifier EventNotifier { get; }
 
     public CacheManager(int maxItems)
@@ -28,14 +26,11 @@ public sealed class CacheManager : ICacheManager, IDisposable
         _maxItems = maxItems;
         _cache = new Dictionary<string, CacheItem>();
 
-        // Initialize LFU tracking
         _frequencyBuckets = new Dictionary<int, HashSet<string>>();
         _minFrequency = 0;
 
-        // Initialize event notifier
         EventNotifier = new CacheEventNotifier();
 
-        // Background cleanup every 60 seconds
         _cleanupTimer = new Timer(
             CleanupExpiredItems,
             null,
@@ -53,9 +48,8 @@ public sealed class CacheManager : ICacheManager, IDisposable
             return false;
         }
 
-        lock (_capacityLock)
+        lock (_lock)
         {
-            // If at capacity, evict least frequently used item
             if (_cache.Count >= _maxItems)
             {
                 _logger.Info($"CAPACITY REACHED: Cache full, triggering LFU eviction {GetCacheStats()}");
@@ -105,7 +99,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
             return null;
         }
 
-        lock (_capacityLock)
+        lock (_lock)
         {
             if (!_cache.TryGetValue(key, out var item))
             {
@@ -147,7 +141,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
             return false;
         }
 
-        lock (_capacityLock)
+        lock (_lock)
         {
             if (!_cache.TryGetValue(key, out var existingItem))
             {
@@ -196,7 +190,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
             return false;
         }
 
-        lock (_capacityLock)
+        lock (_lock)
         {
             if (_cache.TryGetValue(key, out var item))
             {
@@ -222,7 +216,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
 
     private void CleanupExpiredItems(object state)
     {
-        lock (_capacityLock)
+        lock (_lock)
         {
             var expiredItems = _cache
                 .Where(kvp => kvp.Value.IsExpired)
