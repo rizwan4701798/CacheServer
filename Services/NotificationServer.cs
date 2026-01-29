@@ -102,7 +102,6 @@ public class NotificationServer
                     client.SubscribedEvents = request.SubscribedEventTypes?
                         .Select(e => Enum.Parse<CacheEventType>(e))
                         .ToHashSet() ?? Enum.GetValues<CacheEventType>().ToHashSet();
-                    client.KeyPattern = request.KeyPattern;
 
                     _logger.Info($"Client {client.Id} subscribed to events: {string.Join(", ", client.SubscribedEvents)}");
 
@@ -153,10 +152,6 @@ public class NotificationServer
             var client = kvp.Value;
 
             if (client.SubscribedEvents.Count > 0 && !client.SubscribedEvents.Contains(cacheEvent.EventType))
-                continue;
-
-            if (!string.IsNullOrEmpty(client.KeyPattern) &&
-                !MatchesPattern(cacheEvent.Key, client.KeyPattern))
                 continue;
 
             try
@@ -213,20 +208,6 @@ public class NotificationServer
         await stream.FlushAsync().ConfigureAwait(false);
     }
 
-    private static bool MatchesPattern(string key, string pattern)
-    {
-        if (string.IsNullOrEmpty(pattern)) return true;
-        if (string.IsNullOrEmpty(key)) return false;
-
-        if (pattern.EndsWith('*'))
-        {
-            return key.StartsWith(pattern.TrimEnd('*'), StringComparison.Ordinal);
-        }
-
-        // Exact match
-        return string.Equals(key, pattern, StringComparison.Ordinal);
-    }
-
     public int SubscriberCount => _subscribers.Count;
 }
 
@@ -235,6 +216,5 @@ internal sealed class NotificationClient(string id, TcpClient tcpClient)
     public string Id { get; } = id;
     public TcpClient TcpClient { get; } = tcpClient;
     public HashSet<CacheEventType> SubscribedEvents { get; set; } = [];
-    public string? KeyPattern { get; set; }
     public object WriteLock { get; } = new();
 }

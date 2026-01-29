@@ -7,6 +7,5 @@ public class CacheRequest
     public object? Value { get; set; }
     public int? ExpirationSeconds { get; set; }
     public string[]? SubscribedEventTypes { get; set; }
-    public string? KeyPattern { get; set; }
 }
 
