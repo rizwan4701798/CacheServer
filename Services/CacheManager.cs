@@ -3,16 +3,6 @@ using Newtonsoft.Json;
 
 namespace Manager;
 
-internal sealed class CacheItem
-{
-    public object? Value { get; set; }
-    public DateTime? ExpiresAt { get; set; }
-    public int Frequency { get; set; }
-    public DateTime LastAccessedAt { get; set; }
-
-    public bool IsExpired => ExpiresAt.HasValue && DateTime.UtcNow > ExpiresAt.Value;
-}
-
 public sealed class CacheManager : ICacheManager, IDisposable
 {
     private readonly ILog _logger;
@@ -23,9 +13,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
     private bool _disposed;
 
     // LFU tracking: frequency -> set of keys with that frequency
-    private readonly Dictionary<int, LinkedList<string>> _frequencyBuckets;
-    // Quick lookup: key -> node in the linked list (for O(1) removal)
-    private readonly Dictionary<string, LinkedListNode<string>> _keyNodes;
+    private readonly Dictionary<int, HashSet<string>> _frequencyBuckets;
     private int _minFrequency;
 
     // Event notifier for cache events
@@ -41,8 +29,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
         _cache = new Dictionary<string, CacheItem>();
 
         // Initialize LFU tracking
-        _frequencyBuckets = new Dictionary<int, LinkedList<string>>();
-        _keyNodes = new Dictionary<string, LinkedListNode<string>>();
+        _frequencyBuckets = new Dictionary<int, HashSet<string>>();
         _minFrequency = 0;
 
         // Initialize event notifier
@@ -261,9 +248,6 @@ public sealed class CacheManager : ICacheManager, IDisposable
 
     #region Logging Helper Methods
 
-    /// <summary>
-    /// Safely serializes a value for logging, truncating if too long.
-    /// </summary>
     private string SerializeValueForLog(object value, int maxLength = 200)
     {
         if (value == null) return "null";
@@ -283,9 +267,6 @@ public sealed class CacheManager : ICacheManager, IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets the current cache statistics for logging.
-    /// </summary>
     private string GetCacheStats()
     {
         return $"[CacheCount={_cache.Count}/{_maxItems}]";
@@ -299,28 +280,23 @@ public sealed class CacheManager : ICacheManager, IDisposable
     {
         if (!_frequencyBuckets.TryGetValue(frequency, out var bucket))
         {
-            bucket = new LinkedList<string>();
+            bucket = [];
             _frequencyBuckets[frequency] = bucket;
         }
 
-        var node = bucket.AddLast(key);
-        _keyNodes[key] = node;
+        bucket.Add(key);
     }
 
     private void RemoveFromFrequencyBucket(string key, int frequency)
     {
-        if (_keyNodes.TryGetValue(key, out var node))
+        if (_frequencyBuckets.TryGetValue(frequency, out var bucket))
         {
-            if (_frequencyBuckets.TryGetValue(frequency, out var bucket))
-            {
-                bucket.Remove(node);
+            bucket.Remove(key);
 
-                if (bucket.Count == 0)
-                {
-                    _frequencyBuckets.Remove(frequency);
-                }
+            if (bucket.Count == 0)
+            {
+                _frequencyBuckets.Remove(frequency);
             }
-            _keyNodes.Remove(key);
         }
     }
 
@@ -346,7 +322,7 @@ public sealed class CacheManager : ICacheManager, IDisposable
     {
         if (_frequencyBuckets.TryGetValue(_minFrequency, out var bucket) && bucket.Count > 0)
         {
-            string keyToEvict = bucket.First.Value;
+            string keyToEvict = bucket.First();
 
             if (_cache.TryGetValue(keyToEvict, out var itemToEvict))
             {
