@@ -9,7 +9,7 @@ public enum CacheEventType
     ItemEvicted
 }
 
-public sealed class CacheEvent
+public class CacheEvent
 {
     public CacheEventType EventType { get; set; }
     public string Key { get; set; } = string.Empty;

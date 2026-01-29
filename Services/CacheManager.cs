@@ -3,7 +3,7 @@ using Newtonsoft.Json;
 
 namespace Manager;
 
-public sealed class CacheManager : ICacheManager, IDisposable
+public class CacheManager : ICacheManager, IDisposable
 {
     private readonly ILog _logger;
     private readonly Dictionary<string, CacheItem> _cache;

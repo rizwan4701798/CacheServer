@@ -9,7 +9,7 @@ using Newtonsoft.Json;
 
 namespace CacheServer.Server;
 
-public sealed class NotificationServer
+public class NotificationServer
 {
     private readonly TcpListener _listener;
     private readonly ICacheManager _cacheManager;

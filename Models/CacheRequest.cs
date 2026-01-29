@@ -1,6 +1,6 @@
 namespace CacheServerModels;
 
-public sealed class CacheRequest
+public class CacheRequest
 {
     public string? Operation { get; set; }
     public string? Key { get; set; }

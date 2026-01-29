@@ -8,7 +8,7 @@ using CacheServerModels;
 
 namespace CacheServer.Server;
 
-public sealed class CacheServer
+public class CacheServer
 {
     private readonly TcpListener _listener;
     private readonly ICacheManager _cacheManager;

@@ -4,7 +4,7 @@ using Microsoft.Extensions.Hosting;
 using log4net;
 using CacheServer.Server;
 
-public sealed class CacheHostedService(
+public class CacheHostedService(
     IConfiguration configuration,
     ICacheManager cacheManager) : IHostedService
 {

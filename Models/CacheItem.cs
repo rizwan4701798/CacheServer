@@ -3,7 +3,7 @@ using Newtonsoft.Json;
 
 namespace Manager;
 
-internal sealed class CacheItem
+public class CacheItem
 {
     public object? Value { get; set; }
     public DateTime? ExpiresAt { get; set; }

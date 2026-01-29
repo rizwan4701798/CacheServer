@@ -1,6 +1,6 @@
 namespace CacheServerModels;
 
-public sealed class CacheResponse
+public class CacheResponse
 {
     public bool Success { get; set; }
     public object? Value { get; set; }

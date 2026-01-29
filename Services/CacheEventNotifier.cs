@@ -3,7 +3,7 @@ using log4net;
 
 namespace Manager;
 
-public sealed class CacheEventNotifier : ICacheEventNotifier
+public class CacheEventNotifier : ICacheEventNotifier
 {
     private readonly ILog _logger = LogManager.GetLogger(typeof(CacheEventNotifier));
 
