@@ -47,6 +47,19 @@ public class CacheServer
 
         foreach (var client in _subscribers.Values)
         {
+            // We must call the method. Since OnCacheEvent is an event handler (void), we usually fire and forget or block.
+            // Since our SendToClientAsync is actually synchronous inside the lock with a Task wrapper, we can just Wait() or use the sync approach logic that I moved into SendToClientAsync.
+            // Actually, I should just fix SendToClientAsync to be consistent. 
+            // Better yet, I'll update this loop to use the method I defined.
+            
+            // The original code closed the client connection directly.
+            // If the intent is to send a "server stopping" message, a specific CacheResponse would be needed.
+            // For now, we'll assume the original intent of just closing the connection is sufficient for Stop().
+            // If a notification is desired, 'notification' would need to be defined as a CacheResponse.
+            // For example: var notification = new CacheResponse { Success = true, Message = "Server shutting down." };
+            // Then: _ = Task.Run(() => SendToClientAsync(client, notification));
+            // However, the current instruction only provides a partial snippet that would introduce a compilation error.
+            // Sticking to the original behavior of closing the client directly, as 'notification' is undefined.
             try
             {
                 client.TcpClient.Close();
@@ -80,42 +93,85 @@ public class CacheServer
 
     private async Task HandleClientAsync(TcpClient client)
     {
-        var shouldClose = true;
+        var clientId = Guid.NewGuid().ToString();
+        var clientConnection = new NotificationClient(clientId, client);
+        
+        // Add to subscribers immediately so they can receive notifications if/when they subscribe
+        _subscribers.TryAdd(clientId, clientConnection);
+        _logger.Info($"Client connected: {clientId}");
+
         try
         {
-            await using var stream = client.GetStream();
-            var buffer = new byte[4096];    
-            int bytesRead = await stream.ReadAsync(buffer).ConfigureAwait(false);
-
-            string requestJson = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-            var request = JsonConvert.DeserializeObject<CacheRequest>(requestJson);
-
-            // Check for notification subscription
-            if (request?.Operation?.ToUpperInvariant() == "SUBSCRIBE")
+            var stream = client.GetStream();
+            
+            // Use StreamReader/JsonTextReader for dynamic message parsing
+            using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true))
+            using (var jsonReader = new JsonTextReader(reader) { CloseInput = false, SupportMultipleContent = true })
             {
-                _logger.Info("Received subscription request. handling locally.");
-                RegisterNotificationClient(client, request);
-                shouldClose = false; // We take ownership
-                return;
+                var serializer = new JsonSerializer();
+
+                while (_isRunning && client.Connected)
+                {
+                    // Read next JSON object from the stream
+                    // We need to check if we can read. JsonTextReader.Read() blocks, so providing cancellation via stream closing is standard.
+                    if (!await jsonReader.ReadAsync().ConfigureAwait(false))
+                        break;
+
+                    // Deserialize the current object
+                    var request = serializer.Deserialize<CacheRequest>(jsonReader);
+                    
+                    if (request == null) continue;
+
+                    CacheResponse response;
+
+                    // Handle Special Sub/Unsub commands
+                    if (request.Operation?.ToUpperInvariant() == "SUBSCRIBE")
+                    {
+                        clientConnection.SubscribedEvents = request.SubscribedEventTypes?
+                            .Select(e => Enum.Parse<CacheEventType>(e))
+                            .ToHashSet() ?? Enum.GetValues<CacheEventType>().ToHashSet();
+
+                        _logger.Info($"Client {clientId} subscribed to: {string.Join(", ", clientConnection.SubscribedEvents)}");
+                        response = new CacheResponse { Success = true };
+                    }
+                    else if (request.Operation?.ToUpperInvariant() == "UNSUBSCRIBE")
+                    {
+                        clientConnection.SubscribedEvents.Clear();
+                        _logger.Info($"Client {clientId} unsubscribed");
+                        response = new CacheResponse { Success = true };
+                    }
+                    else
+                    {
+                        // Standard CRUD
+                        response = ProcessRequest(request);
+                    }
+
+                    // Send Response safely
+                    await SendToClientAsync(clientConnection, response).ConfigureAwait(false);
+                }
             }
-
-            CacheResponse response = ProcessRequest(request);
-
-            string responseJson = JsonConvert.SerializeObject(response);
-            byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
-
-            await stream.WriteAsync(responseBytes).ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+             _logger.Warn($"Client {clientId} sent invalid JSON.Disconnecting.");
         }
         catch (Exception ex)
         {
-            _logger.Error(CacheServerConstants.ErrorHandlingClient, ex);
+            if (_isRunning)
+            {
+                // Common to get IO exceptions on disconnect
+                _logger.Debug($"Client {clientId} disconnected: {ex.Message}");
+            }
         }
         finally
         {
-            if (shouldClose)
+            _subscribers.TryRemove(clientId, out _);
+            try
             {
                 client.Close();
             }
+            catch { }
+            _logger.Info($"Client disconnected: {clientId}");
         }
     }
 
@@ -144,95 +200,6 @@ public class CacheServer
         }
     }
 
-    private void RegisterNotificationClient(TcpClient tcpClient, CacheRequest initialRequest)
-    {
-        if (!_isRunning)
-        {
-             tcpClient.Close();
-             return;
-        }
-
-        var clientId = Guid.NewGuid().ToString();
-        var notificationClient = new NotificationClient(clientId, tcpClient);
-
-        // Handle initial subscription immediately
-        if (initialRequest?.Operation?.ToUpperInvariant() == "SUBSCRIBE")
-        {
-             notificationClient.SubscribedEvents = initialRequest.SubscribedEventTypes?
-                .Select(e => Enum.Parse<CacheEventType>(e))
-                .ToHashSet() ?? Enum.GetValues<CacheEventType>().ToHashSet();
-             
-             _logger.Info($"Client {clientId} registered and subscribed to events: {string.Join(", ", notificationClient.SubscribedEvents)}");
-        }
-
-        if (_subscribers.TryAdd(clientId, notificationClient))
-        {
-            _ = HandleNotificationClientAsync(notificationClient);
-        }
-        else
-        {
-             tcpClient.Close();
-        }
-    }
-
-    private async Task HandleNotificationClientAsync(NotificationClient client)
-    {
-        try
-        {
-            var stream = client.TcpClient.GetStream();
-            var buffer = new byte[4096];
-
-            // Send Ack for subscription if we just registered them
-            var ack = new CacheResponse { Success = true };
-            await SendToClientAsync(client, ack).ConfigureAwait(false);
-
-            while (client.TcpClient.Connected && _isRunning)
-            {
-                int bytesRead = await stream.ReadAsync(buffer).ConfigureAwait(false);
-                if (bytesRead == 0) break;
-
-                string json = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                var request = JsonConvert.DeserializeObject<CacheRequest>(json);
-
-                if (request?.Operation?.ToUpperInvariant() == "SUBSCRIBE")
-                {
-                    client.SubscribedEvents = request.SubscribedEventTypes?
-                        .Select(e => Enum.Parse<CacheEventType>(e))
-                        .ToHashSet() ?? Enum.GetValues<CacheEventType>().ToHashSet();
-
-                    _logger.Info($"Client {client.Id} updated subscription: {string.Join(", ", client.SubscribedEvents)}");
-
-                    var response = new CacheResponse { Success = true };
-                    await SendToClientAsync(client, response).ConfigureAwait(false);
-                }
-                else if (request?.Operation?.ToUpperInvariant() == "UNSUBSCRIBE")
-                {
-                    _logger.Info($"Client {client.Id} unsubscribed.");
-                    _subscribers.TryRemove(client.Id, out _);
-                    break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            if (_isRunning)
-                _logger.Debug($"Notification client {client.Id} disconnected: {ex.Message}");
-        }
-        finally
-        {
-            _subscribers.TryRemove(client.Id, out _);
-            try
-            {
-                client.TcpClient.Close();
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug($"Error closing client {client.Id}: {ex.Message}");
-            }
-            _logger.Debug($"Notification client {client.Id} removed.");
-        }
-    }
-
     private void OnCacheEvent(object? sender, CacheEvent cacheEvent)
     {
         var notification = new CacheResponse
@@ -251,45 +218,8 @@ public class CacheServer
             if (client.SubscribedEvents.Count > 0 && !client.SubscribedEvents.Contains(cacheEvent.EventType))
                 continue;
 
-            try
-            {
-                SendToClient(client, notification);
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug($"Failed to send notification to client {client.Id}: {ex.Message}");
-                clientsToRemove.Add(kvp.Key);
-            }
-        }
-
-        foreach (var clientId in clientsToRemove)
-        {
-            if (_subscribers.TryRemove(clientId, out var client))
-            {
-                try
-                {
-                    client.TcpClient.Close();
-                }
-                catch (Exception ex)
-                {
-                    _logger.Debug($"Error closing client {clientId}: {ex.Message}");
-                }
-            }
-        }
-    }
-
-    private void SendToClient(NotificationClient client, CacheResponse response)
-    {
-        if (!client.TcpClient.Connected) return;
-
-        var json = JsonConvert.SerializeObject(response);
-        var bytes = Encoding.UTF8.GetBytes(json + "\n");
-
-        lock (client.WriteLock)
-        {
-            var stream = client.TcpClient.GetStream();
-            stream.Write(bytes, 0, bytes.Length);
-            stream.Flush();
+            // Notify asynchronously (fire and forget)
+            _ = Task.Run(() => SendToClientAsync(client, notification));
         }
     }
 
@@ -297,13 +227,44 @@ public class CacheServer
     {
         if (!client.TcpClient.Connected) return;
 
+        // Serialize and Write synchronously inside lock to ensure atomicity of the message on the wire
+        // (Async lock would be better but simple lock is safer for avoiding interleaved writes)
+        // However, we are in an async method. We should prepare bytes then lock and write?
+        // NetworkStream write isn't thread safe for concurrent writes.
+        
         var json = JsonConvert.SerializeObject(response);
-        var bytes = Encoding.UTF8.GetBytes(json + "\n");
+        var bytes = Encoding.UTF8.GetBytes(json + "\n"); // Newline delimiter helper for some clients
 
-        var stream = client.TcpClient.GetStream();
-        await stream.WriteAsync(bytes).ConfigureAwait(false);
-        await stream.FlushAsync().ConfigureAwait(false);
+        // We use a semaphore or lock. NotificationClient has a 'object WriteLock'.
+        // We cannot await inside a lock. We should use NetworkStream.Write (sync) or SemaphoreSlim.
+        // Given the previous code used `lock(client.WriteLock)`, let's stick to synchronous write for safety 
+        // OR use a proper async locking mechanism.
+        // For simple migration, we will use the existing WriteLock and synchronous GetStream().Write
+        // This blocks the thread but ensures safety.
+        
+        try 
+        {
+            // Note: If we want true async IO with concurrency, we need SemaphoreSlim in NotificationClient.
+            // But 'NotificationClient' is defined at the bottom as a simple record-like class.
+            // Let's upgrade the write to be safe.
+            lock (client.WriteLock)
+            {
+                 var stream = client.TcpClient.GetStream();
+                 stream.Write(bytes, 0, bytes.Length);
+                 stream.Flush();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"Failed to write to client {client.Id}: {ex.Message}");
+            client.TcpClient.Close();
+        }
+        
+        await Task.CompletedTask; // Keep signature async compatible if needed, or refactor to void
     }
+    
+    // Remove unused methods
+
 }
 
 internal sealed class NotificationClient(string id, TcpClient tcpClient)
