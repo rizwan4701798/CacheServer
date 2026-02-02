@@ -48,14 +48,6 @@ public class CacheServer
         _cts?.Cancel();
         _listener.Stop();
         
-        // Wait for listener if needed, but usually we just let it die
-        
-        // SubscriptionManager might want to notify clients loop?
-        // Since we are cancelling the token passed to ClientSession, they should exit their loops.
-        // We can explicitly clear subscribers.
-        // The original code iterated subscribers and closed connections.
-        // We can rely on ClientSessions handling cancellation.
-        
         _logger.Info(CacheServerConstants.CacheServerStopped);
     }
 
@@ -77,7 +69,6 @@ public class CacheServer
             }
             catch (Exception ex)
             {
-                 // Check if it's just the listener stopping
                  if (!token.IsCancellationRequested)
                     _logger.Error(CacheServerConstants.ErrorAcceptingClient, ex);
             }
