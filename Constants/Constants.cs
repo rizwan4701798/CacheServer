@@ -40,4 +40,47 @@ public static class CacheServerConstants
     public const string READ = "READ";
     public const string UPDATE = "UPDATE";
     public const string DELETE = "DELETE";
+
+    // Logging & Errors
+    public const string InvalidRequest = "Invalid request";
+    public const string ClientConnected = "Client connected: {0}";
+    public const string ClientSubscribed = "Client {0} subscribed to: {1}";
+    public const string ClientUnsubscribed = "Client {0} unsubscribed";
+    public const string ClientInvalidJson = "Client {0} sent invalid JSON. Disconnecting.";
+    public const string ClientDisconnected = "Client {0} disconnected: {1}";
+    public const string ClientDisconnectedInfo = "Client disconnected: {0}";
+    public const string ClientWriteFailed = "Failed to write to client {0}: {1}";
+
+    // CacheHostedService
+    public const string StartingCacheServer = "Starting Cache Server on port {0}";
+    public const string CacheServerStartedSuccess = "Cache Server started successfully";
+    public const string ServerFailedToStart = "Server failed to start";
+    public const string StoppingServers = "Stopping servers";
+
+    // CacheManager Additional
+    public const string CreateFailedEmpty = "CREATE FAILED: Empty or null key provided, Value={0}";
+    public const string CapacityReachedLog = "CAPACITY REACHED: Cache full, triggering LFU eviction {0}";
+    public const string CreateSuccessLog = "CREATE SUCCESS: Key='{0}', Value={1}{2} {3}";
+    public const string CreateDuplicateLog = "CREATE FAILED (duplicate): Key='{0}' already exists {1}";
+    
+    public const string ReadFailedEmpty = "READ FAILED: Empty or null key provided";
+    public const string ReadMissLog = "READ MISS: Key='{0}' not found {1}";
+    public const string ReadExpiredLog = "READ EXPIRED: Key='{0}', Value={1}, ExpiredAt={2}, Frequency={3} {4}";
+    public const string ReadHitLog = "READ HIT: Key='{0}', Value={1}, Frequency={2}->{3}{4} {5}";
+    
+    public const string UpdateFailedEmpty = "UPDATE FAILED: Empty or null key provided, Value={0}";
+    public const string UpdateNotFoundLog = "UPDATE FAILED: Key='{0}' not found {1}";
+    public const string UpdateExpiredLog = "UPDATE EXPIRED: Key='{0}', OldValue={1}, ExpiredAt={2} {3}";
+    public const string UpdateSuccessLog = "UPDATE SUCCESS: Key='{0}', OldValue={1}, NewValue={2}, Frequency={3}{4} {5}";
+    
+    public const string DeleteFailedEmpty = "DELETE FAILED: Empty or null key provided";
+    public const string DeleteSuccessLog = "DELETE SUCCESS: Key='{0}', Value={1}, Frequency={2}{3} {4}";
+    public const string DeleteNotFoundLog = "DELETE FAILED: Key='{0}' not found {1}";
+    
+    public const string CleanupExpiredLog = "CLEANUP EXPIRED: Key='{0}', Value={1}, ExpiredAt={2}, Frequency={3}";
+    public const string CleanupCompleteLog = "CLEANUP COMPLETE: Removed {0} expired item(s) {1}";
+    public const string LfuEvictionLog = "LFU EVICTION: Key='{0}', Value={1}, Frequency={2}{3} {4}";
+    public const string LfuEvictionStart = "LFU eviction (frequency: {0})";
+    public const string LfuEvictionNotFoundLog = "LFU EVICTION: Key='{0}' was in frequency bucket but not in cache";
+    public const string CacheManagerDisposed = "CacheManager disposed";
 }

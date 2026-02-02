@@ -24,7 +24,7 @@ public class RequestProcessor : IRequestProcessor
     {
         if (request is null)
         {
-            return new CacheResponse { Success = false, Error = "Invalid request" };
+            return new CacheResponse { Success = false, Error = CacheServerConstants.InvalidRequest };
         }
 
         try

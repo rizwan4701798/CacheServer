@@ -23,7 +23,7 @@ public class CacheHostedService(
                 CacheServerConstants.CacheSettingsPortConfigName,
                 5050);
 
-            _logger.Info($"Starting Cache Server on port {port}");
+            _logger.Info(string.Format(CacheServerConstants.StartingCacheServer, port));
 
             _cacheServer = new CacheServer.Server.CacheServer(
                 port,
@@ -31,11 +31,11 @@ public class CacheHostedService(
 
             _cacheServer.Start();
 
-            _logger.Info("Cache Server started successfully");
+            _logger.Info(CacheServerConstants.CacheServerStartedSuccess);
         }
         catch (Exception ex)
         {
-            _logger.Fatal("Server failed to start", ex);
+            _logger.Fatal(CacheServerConstants.ServerFailedToStart, ex);
             throw; 
         }
 
@@ -46,12 +46,12 @@ public class CacheHostedService(
     {
         try
         {
-            _logger.Info("Stopping servers");
+            _logger.Info(CacheServerConstants.StoppingServers);
 
 
 
             _cacheServer?.Stop();
-            _logger.Info("Cache Server stopped");
+            _logger.Info(CacheServerConstants.CacheServerStopped);
 
             if (_cacheManager is IDisposable disposableCacheManager)
             {

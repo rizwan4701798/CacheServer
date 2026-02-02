@@ -35,7 +35,7 @@ public class ClientSession : IClientSession
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        _logger.Info($"Client connected: {_clientId}");
+        _logger.Info(string.Format(CacheServerConstants.ClientConnected, _clientId));
         _subscriptionManager.AddClient(_clientId, this);
 
         try
@@ -63,13 +63,13 @@ public class ClientSession : IClientSession
                             .ToHashSet() ?? Enum.GetValues<CacheEventType>().ToHashSet();
                      
                      _subscriptionManager.Subscribe(_clientId, events);
-                     _logger.Info($"Client {_clientId} subscribed to: {string.Join(", ", events)}");
+                     _logger.Info(string.Format(CacheServerConstants.ClientSubscribed, _clientId, string.Join(", ", events)));
                      response = new CacheResponse { Success = true };
                  }
                  else if (request.Operation == CacheOperation.Unsubscribe)
                  {
                      _subscriptionManager.Unsubscribe(_clientId);
-                     _logger.Info($"Client {_clientId} unsubscribed");
+                     _logger.Info(string.Format(CacheServerConstants.ClientUnsubscribed, _clientId));
                      response = new CacheResponse { Success = true };
                  }
                  else
@@ -83,17 +83,17 @@ public class ClientSession : IClientSession
         catch (OperationCanceledException) { }
         catch (JsonException)
         {
-             _logger.Warn($"Client {_clientId} sent invalid JSON. Disconnecting.");
+             _logger.Warn(string.Format(CacheServerConstants.ClientInvalidJson, _clientId));
         }
         catch (Exception ex)
         {
-             _logger.Debug($"Client {_clientId} disconnected: {ex.Message}");
+             _logger.Debug(string.Format(CacheServerConstants.ClientDisconnected, _clientId, ex.Message));
         }
         finally
         {
             _subscriptionManager.RemoveClient(_clientId);
             try { _tcpClient.Close(); } catch { }
-            _logger.Info($"Client disconnected: {_clientId}");
+            _logger.Info(string.Format(CacheServerConstants.ClientDisconnectedInfo, _clientId));
         }
     }
 
@@ -115,7 +115,7 @@ public class ClientSession : IClientSession
         }
         catch (Exception ex)
         {
-            _logger.Debug($"Failed to write to client {_clientId}: {ex.Message}");
+            _logger.Debug(string.Format(CacheServerConstants.ClientWriteFailed, _clientId, ex.Message));
             try { _tcpClient.Close(); } catch { }
         }
 
