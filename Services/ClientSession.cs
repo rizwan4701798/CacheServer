@@ -57,7 +57,8 @@ public class ClientSession : IClientSession
 
                  if (request.Operation == CacheOperation.Subscribe)
                  {
-                     var events = request.SubscribedEventTypes?
+                     var subRequest = request as SubscriptionRequest;
+                     var events = subRequest?.SubscribedEventTypes?
                             .Select(e => Enum.Parse<CacheEventType>(e))
                             .ToHashSet() ?? Enum.GetValues<CacheEventType>().ToHashSet();
                      

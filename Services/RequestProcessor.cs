@@ -29,12 +29,12 @@ public class RequestProcessor : IRequestProcessor
 
         try
         {
-            return request.Operation switch
+            return request switch
             {
-                CacheOperation.Create => new CacheResponse { Success = _cacheManager.Create(request.Key!, request.Value, request.ExpirationSeconds) },
-                CacheOperation.Read => new CacheResponse { Success = true, Value = _cacheManager.Read(request.Key!) },
-                CacheOperation.Update => new CacheResponse { Success = _cacheManager.Update(request.Key!, request.Value, request.ExpirationSeconds) },
-                CacheOperation.Delete => new CacheResponse { Success = _cacheManager.Delete(request.Key!) },
+                DataRequest dr when dr.Operation == CacheOperation.Create => new CacheResponse { Success = _cacheManager.Create(dr.Key, dr.Value, dr.ExpirationSeconds) },
+                KeyRequest kr when kr.Operation == CacheOperation.Read => new CacheResponse { Success = true, Value = _cacheManager.Read(kr.Key) },
+                DataRequest dr when dr.Operation == CacheOperation.Update => new CacheResponse { Success = _cacheManager.Update(dr.Key, dr.Value, dr.ExpirationSeconds) },
+                KeyRequest kr when kr.Operation == CacheOperation.Delete => new CacheResponse { Success = _cacheManager.Delete(kr.Key) },
                 _ => new CacheResponse { Success = false, Error = CacheServerConstants.InvalidOperation }
             };
         }
