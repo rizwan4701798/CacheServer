@@ -1,0 +1,85 @@
+using System.Collections.Concurrent;
+using CacheServerModels;
+using Manager;
+
+namespace CacheServer.Services;
+
+public interface ISubscriptionManager
+{
+    void AddClient(string clientId, IClientSession session);
+    void RemoveClient(string clientId);
+    void Subscribe(string clientId, IEnumerable<CacheEventType> eventTypes);
+    void Unsubscribe(string clientId);
+}
+
+public class SubscriptionManager : ISubscriptionManager
+{
+    private readonly ConcurrentDictionary<string, ClientSubscription> _subscribers = new();
+
+    public SubscriptionManager(ICacheManager cacheManager)
+    {
+        cacheManager.EventNotifier.CacheEventOccurred += OnCacheEvent;
+    }
+
+    public void AddClient(string clientId, IClientSession session)
+    {
+        _subscribers.TryAdd(clientId, new ClientSubscription(session));
+    }
+
+    public void RemoveClient(string clientId)
+    {
+        _subscribers.TryRemove(clientId, out _);
+    }
+
+    public void Subscribe(string clientId, IEnumerable<CacheEventType> eventTypes)
+    {
+        if (_subscribers.TryGetValue(clientId, out var subscription))
+        {
+            var newSet = new HashSet<CacheEventType>(eventTypes);
+            // If empty, maybe subscribe to all? The original code did:
+            // "request.SubscribedEventTypes?.Select... ?? Enum.GetValues()..."
+            // Callers should handle the "all" logic logic before calling this, or here.
+            // I'll assume the list passed here is final.
+            subscription.SubscribedEvents = newSet;
+        }
+    }
+
+    public void Unsubscribe(string clientId)
+    {
+        if (_subscribers.TryGetValue(clientId, out var subscription))
+        {
+            subscription.SubscribedEvents.Clear();
+        }
+    }
+
+    private void OnCacheEvent(object? sender, CacheEvent cacheEvent)
+    {
+        var notification = new CacheResponse
+        {
+            IsNotification = true,
+            Event = cacheEvent,
+            Success = true
+        };
+
+        foreach (var sub in _subscribers.Values)
+        {
+            if (sub.SubscribedEvents.Count > 0 && 
+                (sub.SubscribedEvents.Contains(cacheEvent.EventType)))
+            {
+                // Fire and forget
+                _ = sub.Session.SendAsync(notification);
+            }
+        }
+    }
+
+    private class ClientSubscription
+    {
+        public IClientSession Session { get; }
+        public HashSet<CacheEventType> SubscribedEvents { get; set; } = new();
+
+        public ClientSubscription(IClientSession session)
+        {
+            Session = session;
+        }
+    }
+}
