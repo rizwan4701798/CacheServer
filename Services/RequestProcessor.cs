@@ -24,24 +24,28 @@ public class RequestProcessor : IRequestProcessor
     {
         if (request is null)
         {
-            return new CacheResponse { Success = false, Error = CacheServerConstants.InvalidRequest };
+            return new ErrorResponse(CacheServerConstants.InvalidRequest);
         }
 
         try
         {
             return request switch
             {
-                DataRequest dr when dr.Operation == CacheOperation.Create => new CacheResponse { Success = _cacheManager.Create(dr.Key, dr.Value, dr.ExpirationSeconds) },
-                KeyRequest kr when kr.Operation == CacheOperation.Read => new CacheResponse { Success = true, Value = _cacheManager.Read(kr.Key) },
-                DataRequest dr when dr.Operation == CacheOperation.Update => new CacheResponse { Success = _cacheManager.Update(dr.Key, dr.Value, dr.ExpirationSeconds) },
-                KeyRequest kr when kr.Operation == CacheOperation.Delete => new CacheResponse { Success = _cacheManager.Delete(kr.Key) },
-                _ => new CacheResponse { Success = false, Error = CacheServerConstants.InvalidOperation }
+                DataRequest dr when dr.Operation == CacheOperation.Create => 
+                    _cacheManager.Create(dr.Key, dr.Value, dr.ExpirationSeconds) ? new SuccessResponse() : new CacheResponse { Success = false },
+                KeyRequest kr when kr.Operation == CacheOperation.Read => 
+                    new DataResponse(_cacheManager.Read(kr.Key)),
+                DataRequest dr when dr.Operation == CacheOperation.Update => 
+                    _cacheManager.Update(dr.Key, dr.Value, dr.ExpirationSeconds) ? new SuccessResponse() : new CacheResponse { Success = false },
+                KeyRequest kr when kr.Operation == CacheOperation.Delete => 
+                    _cacheManager.Delete(kr.Key) ? new SuccessResponse() : new CacheResponse { Success = false },
+                _ => new ErrorResponse(CacheServerConstants.InvalidOperation)
             };
         }
         catch (Exception ex)
         {
             _logger.Error(CacheServerConstants.ProcessingRequestFailed, ex);
-            return new CacheResponse { Success = false, Error = ex.Message };
+            return new ErrorResponse(ex.Message);
         }
     }
 }

@@ -54,12 +54,7 @@ public class SubscriptionManager : ISubscriptionManager
 
     private void OnCacheEvent(object? sender, CacheEvent cacheEvent)
     {
-        var notification = new CacheResponse
-        {
-            IsNotification = true,
-            Event = cacheEvent,
-            Success = true
-        };
+        var notification = new NotificationResponse(cacheEvent);
 
         foreach (var sub in _subscribers.Values)
         {

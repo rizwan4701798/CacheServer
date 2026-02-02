@@ -64,13 +64,13 @@ public class ClientSession : IClientSession
                      
                      _subscriptionManager.Subscribe(_clientId, events);
                      _logger.Info(string.Format(CacheServerConstants.ClientSubscribed, _clientId, string.Join(", ", events)));
-                     response = new CacheResponse { Success = true };
+                     response = new SuccessResponse();
                  }
                  else if (request.Operation == CacheOperation.Unsubscribe)
                  {
                      _subscriptionManager.Unsubscribe(_clientId);
                      _logger.Info(string.Format(CacheServerConstants.ClientUnsubscribed, _clientId));
-                     response = new CacheResponse { Success = true };
+                     response = new SuccessResponse();
                  }
                  else
                  {
