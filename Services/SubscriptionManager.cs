@@ -10,6 +10,7 @@ public interface ISubscriptionManager
     void RemoveClient(string clientId);
     void Subscribe(string clientId, IEnumerable<CacheEventType> eventTypes);
     void Unsubscribe(string clientId);
+    void Unsubscribe(string clientId, IEnumerable<CacheEventType> eventTypes);
 }
 
 public class SubscriptionManager : ISubscriptionManager
@@ -35,8 +36,7 @@ public class SubscriptionManager : ISubscriptionManager
     {
         if (_subscribers.TryGetValue(clientId, out var subscription))
         {
-            var newSet = new HashSet<CacheEventType>(eventTypes);
-            subscription.SubscribedEvents = newSet;
+            subscription.SubscribedEvents.UnionWith(eventTypes);
         }
     }
 
@@ -45,6 +45,14 @@ public class SubscriptionManager : ISubscriptionManager
         if (_subscribers.TryGetValue(clientId, out var subscription))
         {
             subscription.SubscribedEvents.Clear();
+        }
+    }
+
+    public void Unsubscribe(string clientId, IEnumerable<CacheEventType> eventTypes)
+    {
+        if (_subscribers.TryGetValue(clientId, out var subscription))
+        {
+            subscription.SubscribedEvents.ExceptWith(eventTypes);
         }
     }
 

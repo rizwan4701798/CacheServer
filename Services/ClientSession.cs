@@ -68,8 +68,20 @@ public class ClientSession : IClientSession
                  }
                  else if (request.Operation == CacheOperation.Unsubscribe)
                  {
-                     _subscriptionManager.Unsubscribe(_clientId);
-                     _logger.Info(string.Format(CacheServerConstants.ClientUnsubscribed, _clientId));
+                     var subRequest = request as SubscriptionRequest;
+                     if (subRequest != null && subRequest.SubscribedEventTypes != null && subRequest.SubscribedEventTypes.Length > 0)
+                     {
+                         var events = subRequest.SubscribedEventTypes
+                                .Select(e => Enum.Parse<CacheEventType>(e))
+                                .ToHashSet();
+                         _subscriptionManager.Unsubscribe(_clientId, events);
+                         _logger.Info(string.Format("Client {0} unsubscribed from: {1}", _clientId, string.Join(", ", events)));
+                     }
+                     else
+                     {
+                         _subscriptionManager.Unsubscribe(_clientId);
+                         _logger.Info(string.Format(CacheServerConstants.ClientUnsubscribed, _clientId));
+                     }
                      response = new SuccessResponse();
                  }
                  else

@@ -55,6 +55,11 @@ public class SubscriptionRequest : CacheRequest
         Operation = CacheOperation.Subscribe;
         SubscribedEventTypes = eventTypes;
     }
+    public SubscriptionRequest(CacheOperation operation, string[]? eventTypes)
+    {
+        Operation = operation;
+        SubscribedEventTypes = eventTypes;
+    }
 }
 
 
@@ -88,7 +93,7 @@ public class CacheRequestConverter : JsonConverter
         {
             CacheOperation.Create or CacheOperation.Update => new DataRequest(),
             CacheOperation.Read or CacheOperation.Delete => new KeyRequest(),
-            CacheOperation.Subscribe => new SubscriptionRequest(),
+            CacheOperation.Subscribe or CacheOperation.Unsubscribe => new SubscriptionRequest(),
             _ => new BasicRequest() 
         };
         
