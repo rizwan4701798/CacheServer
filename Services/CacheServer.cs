@@ -27,7 +27,6 @@ public class CacheServer
         _cacheManager = cacheManager;
         _logger = LogManager.GetLogger(typeof(CacheServer));
         
-        // Initialize components
         _requestProcessor = new RequestProcessor(cacheManager);
         _subscriptionManager = new SubscriptionManager(cacheManager);
     }

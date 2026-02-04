@@ -42,8 +42,6 @@ public class NotificationResponse : CacheResponse
     {
         IsNotification = true;
         Event = cacheEvent;
-        // Typically notifications are considered successful transmissions or independent,
-        // but existing code set Success=true.
         Success = true;
     }
 }

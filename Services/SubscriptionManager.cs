@@ -36,10 +36,6 @@ public class SubscriptionManager : ISubscriptionManager
         if (_subscribers.TryGetValue(clientId, out var subscription))
         {
             var newSet = new HashSet<CacheEventType>(eventTypes);
-            // If empty, maybe subscribe to all? The original code did:
-            // "request.SubscribedEventTypes?.Select... ?? Enum.GetValues()..."
-            // Callers should handle the "all" logic logic before calling this, or here.
-            // I'll assume the list passed here is final.
             subscription.SubscribedEvents = newSet;
         }
     }
@@ -61,7 +57,6 @@ public class SubscriptionManager : ISubscriptionManager
             if (sub.SubscribedEvents.Count > 0 && 
                 (sub.SubscribedEvents.Contains(cacheEvent.EventType)))
             {
-                // Fire and forget
                 _ = sub.Session.SendAsync(notification);
             }
         }
